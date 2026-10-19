@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -10,6 +12,20 @@ from omniimmune.arbiter import Arbiter
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = ROOT / "target_app" / "app.py"
+
+
+def test_main_version_exits_cleanly() -> None:
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "main.py"), "--version"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == "omniimmune 1.0.0\n"
+    assert result.stderr == ""
 
 
 @pytest.mark.integration

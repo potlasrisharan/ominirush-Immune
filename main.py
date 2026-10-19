@@ -12,6 +12,7 @@ from omniimmune.healer.git_branch import GitBranchEngine
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="OmniResilience closed-loop chaos healer")
+    parser.add_argument("--version", action="version", version="omniimmune 1.0.0")
     parser.add_argument("--mode", choices=("docker", "local"), default=os.getenv("OMNI_MODE", "docker"))
     parser.add_argument("--seed", type=int, default=int(os.getenv("OMNI_SEED", "1337")))
     parser.add_argument("--fresh", action="store_true", help="clear cached immune patches before running")
