@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 class EventType:
     ATTACK_STARTED = "attack_started"
+    ATTACK_FINISHED = "attack_finished"
     FAILURE_DETECTED = "failure_detected"
     TRIAGE_DONE = "triage_done"
     PATCH_PROPOSED = "patch_proposed"
