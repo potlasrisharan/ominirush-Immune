@@ -41,4 +41,5 @@ htmlcov/
 
 # Runtime data & temp files
 .omni_memory/
+artifacts/
 *.log

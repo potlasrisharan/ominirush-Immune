@@ -1,0 +1,144 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+
+import pytest
+
+from omniimmune.events import Event, EventBus, EventType
+from omniimmune.memory import ImmuneMemory
+from omniimmune.models import (
+    AttackDNA,
+    AttackType,
+    BugClass,
+    IncidentSignature,
+    ImmunitySummary,
+)
+
+
+def test_attack_dna_defaults_and_hash_exclude_metadata() -> None:
+    dna = AttackDNA(
+        attack_type=AttackType.FUZZ,
+        target_endpoint="/items",
+        payload={"z": 1, "a": [2, 3]},
+    )
+    assert dna.dna_id.startswith("dna-")
+    assert dna.verify_integrity()
+
+    changed_metadata = dna.model_copy(update={"dna_id": "another-id", "sha256": ""})
+    assert changed_metadata.compute_hash() == dna.compute_hash()
+
+    canonical = (
+        '{"attack_type":"fuzz","concurrency":1,"delay_seconds":0.0,'
+        '"headers":{},"http_method":"GET","payload":{"a":[2,3],"z":1},'
+        '"query_params":{},"raw_body":null,"request_count":1,"seed":1337,'
+        '"target_endpoint":"/items"}'
+    )
+    assert dna.sha256 == hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def test_attack_dna_integrity_and_file_roundtrip(tmp_path) -> None:
+    path = tmp_path / "nested" / "attack.json"
+    dna = AttackDNA(attack_type=AttackType.LATENCY, target_endpoint="/health")
+    dna.to_file(path)
+    loaded = AttackDNA.from_file(path)
+    assert loaded == dna
+    assert loaded.verify_integrity()
+
+    path.write_text(
+        path.read_text(encoding="utf-8").replace('"seed":1337', '"seed":1338'),
+        encoding="utf-8",
+    )
+    assert not AttackDNA.from_file(path).verify_integrity()
+
+
+def test_incident_signature_id_uses_only_identity_fields() -> None:
+    first_id = IncidentSignature.make_sig_id(BugClass.PANIC, "/items", "ValueError")
+    same_id = IncidentSignature.make_sig_id(BugClass.PANIC, "/items", "ValueError")
+    different_id = IncidentSignature.make_sig_id(BugClass.PANIC, "/other", "ValueError")
+    assert first_id == same_id
+    assert first_id != different_id
+
+    signature = IncidentSignature(
+        sig_id=first_id,
+        bug_class=BugClass.PANIC,
+        failure_kind="panic",
+        endpoint="/items",
+        exception_type="ValueError",
+        stack_trace="line 10",
+    )
+    assert signature.sig_id == first_id
+
+
+def test_immunity_summary_formula_and_empty_run() -> None:
+    summary = ImmunitySummary.compute(
+        incidents_total=10,
+        incidents_verified=4,
+        regression_passed=True,
+        mean_survival_rate=0.5,
+    )
+    assert summary.score == 54
+    empty = ImmunitySummary.compute(incidents_total=0)
+    assert empty.score == 0
+
+
+@pytest.mark.asyncio
+async def test_event_bus_order_wildcard_history_and_isolation(caplog) -> None:
+    bus = EventBus()
+    received: list[str] = []
+
+    def failing(event: Event) -> None:
+        received.append("failing")
+        raise RuntimeError("expected callback failure")
+
+    bus.subscribe(EventType.ATTACK_STARTED, failing)
+    bus.subscribe("*", lambda event: received.append("wildcard"))
+    bus.subscribe(EventType.ATTACK_STARTED, lambda event: received.append("exact"))
+
+    with caplog.at_level("ERROR"):
+        event = await bus.publish(EventType.ATTACK_STARTED, {"n": 1})
+
+    assert received == ["failing", "wildcard", "exact"]
+    assert event.type == EventType.ATTACK_STARTED
+    assert event.data == {"n": 1}
+    assert bus.history == [event]
+    assert "Event subscriber failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_event_bus_awaits_async_callbacks_in_order() -> None:
+    bus = EventBus()
+    received: list[str] = []
+
+    async def first(event: Event) -> None:
+        await asyncio.sleep(0)
+        received.append("first")
+
+    async def second(event: Event) -> None:
+        received.append("second")
+
+    bus.subscribe("custom", first)
+    bus.subscribe("custom", second)
+    await bus.publish("custom", {})
+    assert received == ["first", "second"]
+
+
+def test_immune_memory_roundtrip_corrupt_missing_count_and_clear(tmp_path) -> None:
+    memory = ImmuneMemory(root=tmp_path / "memory")
+    sig_id = IncidentSignature.make_sig_id(BugClass.STARVATION, "/work", "TimeoutError")
+    memory.save_patch(sig_id, {"verified": True})
+    assert memory.get_patch(sig_id) == {"verified": True}
+    assert memory.get_vaccinated_count() == 1
+
+    (memory.root / f"{sig_id}.json").write_text("{not json", encoding="utf-8")
+    assert memory.get_patch(sig_id) is None
+    assert memory.get_patch("missing") is None
+    assert memory.clear() == 1
+    assert memory.get_vaccinated_count() == 0
+
+
+def test_immune_memory_rejects_unsafe_signature_ids(tmp_path) -> None:
+    memory = ImmuneMemory(tmp_path)
+    for unsafe in ("../escape", "a/b", "", ".", "space here"):
+        with pytest.raises(ValueError):
+            memory.save_patch(unsafe, {})

@@ -2,14 +2,14 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir fastapi==0.115.6 uvicorn==0.34.0
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
 
-EXPOSE 8001
+EXPOSE 9000
 
-HEALTHCHECK --interval=2s --timeout=2s --start-period=2s --retries=3 \
-  CMD curl -f http://localhost:8001/health || exit 1
+HEALTHCHECK --interval=2s --timeout=2s --start-period=3s --retries=3 \
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9000"]

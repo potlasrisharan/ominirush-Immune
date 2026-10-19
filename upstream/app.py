@@ -1,7 +1,7 @@
 import asyncio
-from fastapi import FastAPI, Query
+from fastapi import FastAPI
 
-app = FastAPI(title="Upstream External Service", version="1.0.0")
+app = FastAPI(title="Upstream Service", version="1.0.0")
 
 
 @app.get("/health")
@@ -10,7 +10,6 @@ async def health():
 
 
 @app.get("/api/upstream/slow")
-async def slow_endpoint(delay: float = Query(default=3.0, ge=0.0, le=30.0)):
-    # Simulates a slow third-party payment gateway or partner API
+async def slow_endpoint(delay: float = 4):
     await asyncio.sleep(delay)
-    return {"status": "upstream_ok", "delay_simulated": delay}
+    return {"status": "upstream_ok"}
