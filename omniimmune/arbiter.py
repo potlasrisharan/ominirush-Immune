@@ -12,6 +12,7 @@ import httpx
 from omniimmune.chaos.common import ATTACK_BUG_HINT, compute_latency_stats
 from omniimmune.chaos.runner import RedSwarmRunner
 from omniimmune.events import EventBus, EventType
+from omniimmune.healer.git_branch import GitBranchEngine, GitBranchError
 from omniimmune.healer.patcher import PatchLadder
 from omniimmune.healer.triage import TriageEngine
 from omniimmune.memory import ImmuneMemory
@@ -54,6 +55,7 @@ class Arbiter:
         self.target_file = self.root / "target_app" / "app.py"
         self.memory = ImmuneMemory(os.getenv("OMNI_MEMORY_DIR", str(self.root / "artifacts" / "memory")))
         self.event_bus = EventBus()
+        self.git_engine = GitBranchEngine(self.root)
         self._processes: list[asyncio.subprocess.Process] = []
         self._owns_services = False
         self._patch_diffs: list[str] = []
@@ -233,6 +235,10 @@ class Arbiter:
         if self.fresh:
             self.memory.clear()
         await self._ensure_services()
+        if self.mode == "local":
+            # Keep a local service aligned with the checkout after a previous
+            # run restored its patched target file on the original branch.
+            await self._restart_target()
         hud = None if self.no_ui else OmniHUD()
         runner = RedSwarmRunner(self.target_url, self.event_bus, seed=self.seed)
         triage = TriageEngine(self.target_file)
@@ -292,7 +298,50 @@ class Arbiter:
                         "after": verdict.after.model_dump(),
                         "verdict": "PASS" if verdict.passed else "FAIL",
                         "diff": patch.diff,
+                        "branch_status": "NOT_ATTEMPTED",
+                        "branch": None,
+                        "commit": None,
                     })
+                    incident = self._incidents[-1]
+                    if verdict.passed:
+                        try:
+                            branch = self.git_engine.create_heal_branch(
+                                sig_id=signature.sig_id,
+                                patch_result=patch,
+                                verdict=verdict,
+                            )
+                            escalation = getattr(verdict, "escalation_passed", None)
+                            incident.update({
+                                "branch_status": "CREATED",
+                                "branch": branch,
+                                "commit": self.git_engine.last_commit_sha,
+                                "original_branch": self.git_engine.original_branch,
+                                "base_commit": self.git_engine.original_head,
+                                "target_file": patch.file_path,
+                                "dna_id": verdict.dna_id,
+                                "dna_sha256": getattr(verdict, "dna_sha256", ""),
+                                "baseline_verification": "PASSED" if verdict.regression_passed else "FAILED",
+                                "escalation_verification": (
+                                    "PASSED" if escalation is True else
+                                    "FAILED" if escalation is False else "NOT_AVAILABLE"
+                                ),
+                            })
+                            await self.event_bus.publish(
+                                EventType.GIT_BRANCH_CREATED,
+                                {"sig_id": signature.sig_id, "branch": branch, "commit": self.git_engine.last_commit_sha},
+                            )
+                            if hud:
+                                hud.update_verification(
+                                    branch=branch,
+                                    commit=(self.git_engine.last_commit_sha or "")[:8],
+                                )
+                        except GitBranchError as exc:
+                            incident["branch_status"] = "FAILED"
+                            incident["git_error"] = str(exc)
+                            await self.event_bus.publish(
+                                EventType.GIT_BRANCH_FAILED,
+                                {"sig_id": signature.sig_id, "error": str(exc)},
+                            )
                     if hud:
                         hud.update_verification(score=round(60 * verified / total + 20 * regression_passed + 20 * (sum(survival_rates) / len(survival_rates) if survival_rates else 0)), vaccinated_count=self.memory.get_vaccinated_count(), latency=f"{verdict.after.p50_ms:.1f}/{verdict.after.p95_ms:.1f}/{verdict.after.p99_ms:.1f}ms", status="PASS" if verdict.passed else "FAIL")
                 summary = ImmunitySummary.compute(

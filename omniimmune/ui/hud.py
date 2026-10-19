@@ -115,6 +115,8 @@ class OmniHUD:
                 [("Score", self._value(verification, "score", default=0)),
                  ("Vaccinated", self._value(verification, "vaccinated_count", default=0)),
                  ("Latency", self._value(verification, "latency", "before_after", default="—")),
+                 ("Branch", self._value(verification, "branch", default="—")),
+                 ("Commit", self._value(verification, "commit", default="—")),
                  ("Verdict", self._value(verification, "status", "verdict", default="pending"))]
             ),
             self._gauge(float(score) if isinstance(score, (int, float)) else 0),

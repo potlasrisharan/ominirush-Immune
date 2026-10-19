@@ -89,4 +89,5 @@ class VerifierEngine:
             after=after,
             regression_passed=regression_passed,
             strategy_used=strategy_used,
+            dna_sha256=dna.sha256,
         )

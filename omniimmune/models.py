@@ -119,6 +119,7 @@ class PatchResult(BaseModel):
     applied: bool
     from_memory: bool = False
     error: str | None = None
+    base_file_sha256: str = ""
 
 
 class VerificationVerdict(BaseModel):
@@ -131,6 +132,7 @@ class VerificationVerdict(BaseModel):
     regression_passed: bool
     rolled_back: bool = False
     strategy_used: str = ""
+    dna_sha256: str = ""
 
 
 class ImmunitySummary(BaseModel):

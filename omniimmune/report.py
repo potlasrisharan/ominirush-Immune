@@ -71,6 +71,30 @@ class ReportGenerator:
                 f"| `{incident.get('sig_id', '—')}` | {incident.get('bug_class', '—')} | `{incident.get('dna_hash', '—')}` | `{incident.get('culprit', '—')}` | `{incident.get('strategy', '—')}` | {before_text} | {after_text} | **{incident.get('verdict', 'UNKNOWN')}** |"
             )
 
+        lines.extend(["", "## Automated Repair Branch", ""])
+        for incident in incidents:
+            status = incident.get("branch_status", "NOT_ATTEMPTED")
+            lines.extend(
+                [
+                    f"### `{incident.get('sig_id', '—')}`",
+                    "",
+                    f"- Status: {status}",
+                    f"- Branch: `{incident.get('branch') or '—'}`",
+                    f"- Commit: `{incident.get('commit') or '—'}`",
+                    f"- Original Branch: `{incident.get('original_branch') or '—'}`",
+                    f"- Base Commit: `{incident.get('base_commit') or '—'}`",
+                    f"- Target File: `{incident.get('target_file') or '—'}`",
+                    f"- Patch Strategy: `{incident.get('strategy') or '—'}`",
+                    f"- Triggering DNA ID: `{incident.get('dna_id') or '—'}`",
+                    f"- Triggering DNA SHA-256: `{incident.get('dna_sha256') or incident.get('dna_hash') or '—'}`",
+                    f"- Baseline Verification: {incident.get('baseline_verification', 'NOT_AVAILABLE')}",
+                    f"- Escalation Verification: {incident.get('escalation_verification', 'NOT_AVAILABLE')}",
+                ]
+            )
+            if incident.get("git_error"):
+                lines.append(f"- Git Error: {incident['git_error']}")
+            lines.append("")
+
         lines.extend(["", "## Applied Patches", ""])
         patches = summary.patch_diffs or [incident.get("diff", "") for incident in incidents]
         for index, diff in enumerate(patches, 1):

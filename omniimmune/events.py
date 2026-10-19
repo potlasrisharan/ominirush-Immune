@@ -22,6 +22,8 @@ class EventType:
     VERIFY_FAILED = "verify_failed"
     ROLLED_BACK = "rolled_back"
     MEMORY_HIT = "memory_hit"
+    GIT_BRANCH_CREATED = "git_branch_created"
+    GIT_BRANCH_FAILED = "git_branch_failed"
     RUN_COMPLETE = "run_complete"
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
 from pathlib import Path
 
 import libcst as cst
@@ -351,6 +352,7 @@ class PatchLadder:
             file_path=str(self.target_file),
             diff=diff,
             applied=original != modified,
+            base_file_sha256=hashlib.sha256(original.encode("utf-8")).hexdigest(),
         )
 
     def rollback(self, pristine_content: str) -> None:
