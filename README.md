@@ -1,8 +1,10 @@
 # OmniResilience Phase 2
 
 Phase 2 implements the deterministic Red Swarm: payload fuzzing, serialized-load
-stress, a latency/drop TCP proxy, and parallel attack orchestration. Attack DNA
-is persisted so each failing request can be replayed exactly in a later phase.
+stress, a latency/drop TCP proxy, and parallel attack orchestration. Phase 3 adds
+the Blue Swarm: traceback/AST triage, a LibCST patch ladder, and DNA replay with
+golden-path regression verification. Attack DNA is persisted so each failure can
+be replayed exactly.
 
 ## Requirements
 
@@ -65,4 +67,7 @@ service when exercising the payment verification route.
 - `omniimmune/chaos/storm.py`: `StormLoad`
 - `omniimmune/chaos/latency.py`: `LatencyProxy` and `LatencyDriftAgent`
 - `omniimmune/chaos/runner.py`: `RedSwarmRunner`
+- `omniimmune/healer/triage.py`: traceback and AST `TriageEngine`
+- `omniimmune/healer/patcher.py`: LibCST `PatchLadder` with rollback
+- `omniimmune/verifier/verifier.py`: `VerifierEngine` and golden regressions
 - `artifacts/dna/`: runtime DNA artifacts, ignored by git
