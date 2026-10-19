@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import sys
@@ -257,6 +258,7 @@ class Arbiter:
                 diff=str(cached.get("diff", "")),
                 applied=False,
                 from_memory=True,
+                base_file_sha256=hashlib.sha256(pristine.encode("utf-8")).hexdigest(),
             )
             await self.event_bus.publish(EventType.MEMORY_HIT, {"sig_id": signature.sig_id, "strategy": patch.strategy})
             await self._restart_target()
@@ -283,8 +285,10 @@ class Arbiter:
             self.memory.clear()
         await self._ensure_services()
         if self.mode == "local":
-            # Keep a local service aligned with the checkout after a previous
-            # run restored its patched target file on the original branch.
+            # A previous closed-loop run may have left the local Uvicorn
+            # process serving its verified source while Git restored the
+            # checkout.  Restart once so the attack run always matches the
+            # repository state it is about to diagnose.
             await self._restart_target()
         hud = None if self.no_ui else OmniHUD()
         runner = RedSwarmRunner(self.target_url, self.event_bus, seed=self.seed)
@@ -359,22 +363,23 @@ class Arbiter:
                                 patch_result=patch,
                                 verdict=verdict,
                             )
-                            escalation = getattr(verdict, "escalation_passed", None)
-                            incident.update({
-                                "branch_status": "CREATED",
-                                "branch": branch,
-                                "commit": self.git_engine.last_commit_sha,
-                                "original_branch": self.git_engine.original_branch,
-                                "base_commit": self.git_engine.original_head,
-                                "target_file": patch.file_path,
-                                "dna_id": verdict.dna_id,
-                                "dna_sha256": getattr(verdict, "dna_sha256", ""),
-                                "baseline_verification": "PASSED" if verdict.regression_passed else "FAILED",
-                                "escalation_verification": (
-                                    "PASSED" if escalation is True else
-                                    "FAILED" if escalation is False else "NOT_AVAILABLE"
-                                ),
-                            })
+                            incident.update(
+                                {
+                                    "branch_status": "CREATED",
+                                    "branch": branch,
+                                    "commit": self.git_engine.last_commit_sha,
+                                    "original_branch": self.git_engine.original_branch,
+                                    "base_commit": self.git_engine.original_head,
+                                    "target_file": patch.file_path,
+                                    "dna_id": verdict.dna_id,
+                                    "dna_sha256": verdict.dna_sha256,
+                                    "baseline_verification": "PASSED" if verdict.regression_passed else "FAILED",
+                                    "escalation_verification": (
+                                        "PASSED" if verdict.escalation_passed is True else
+                                        "FAILED" if verdict.escalation_passed is False else "NOT_AVAILABLE"
+                                    ),
+                                }
+                            )
                             await self.event_bus.publish(
                                 EventType.GIT_BRANCH_CREATED,
                                 {"sig_id": signature.sig_id, "branch": branch, "commit": self.git_engine.last_commit_sha},
@@ -391,6 +396,7 @@ class Arbiter:
                                 EventType.GIT_BRANCH_FAILED,
                                 {"sig_id": signature.sig_id, "error": str(exc)},
                             )
+                            logger.error("Verified repair could not be persisted in Git: %s", exc)
                     if hud:
                         hud.update_verification(score=round(60 * verified / total + 20 * regression_passed + 20 * (sum(survival_rates) / len(survival_rates) if survival_rates else 0)), vaccinated_count=self.memory.get_vaccinated_count(), latency=f"{verdict.after.p50_ms:.1f}/{verdict.after.p95_ms:.1f}/{verdict.after.p99_ms:.1f}ms", status="PASS" if verdict.passed else "FAIL")
                 summary = ImmunitySummary.compute(

@@ -90,4 +90,5 @@ class VerifierEngine:
             regression_passed=regression_passed,
             strategy_used=strategy_used,
             dna_sha256=dna.sha256,
+            escalation_passed=None,
         )

@@ -132,9 +132,9 @@ class VerificationVerdict(BaseModel):
     regression_passed: bool
     rolled_back: bool = False
     strategy_used: str = ""
+    dna_sha256: str = ""
     escalation_passed: bool | None = None
     mutations_tested: int = 0
-    dna_sha256: str = ""
 
 
 class ImmunitySummary(BaseModel):
