@@ -14,6 +14,7 @@ from omniimmune.models import (
     IncidentSignature,
     ImmunitySummary,
 )
+from omniimmune.report import generate_html, generate_pr_template
 
 
 def test_attack_dna_defaults_and_hash_exclude_metadata() -> None:
@@ -142,3 +143,61 @@ def test_immune_memory_rejects_unsafe_signature_ids(tmp_path) -> None:
     for unsafe in ("../escape", "a/b", "", ".", "space here"):
         with pytest.raises(ValueError):
             memory.save_patch(unsafe, {})
+
+
+def test_postmortem_dashboard_is_standalone_and_contains_incident_cards(tmp_path) -> None:
+    summary = ImmunitySummary.compute(
+        incidents_total=1,
+        incidents_verified=1,
+        regression_passed=True,
+        mean_survival_rate=1.0,
+    ).model_copy(
+        update={
+            "incidents": [
+                {
+                    "sig_id": "sig-demo123",
+                    "bug_class": "panic",
+                    "culprit": "target_app/app.py:37",
+                    "before": {"p99_ms": 420.0, "error_rate": 1.0},
+                    "after": {"p99_ms": 12.0, "error_rate": 0.0},
+                    "verdict": "PASS",
+                    "branch": "heal/sig-demo123",
+                    "commit": "0123456789abcdef",
+                    "diff": "- raise ValueError()\n+ return JSONResponse(status_code=400)",
+                    "escalation_passed": True,
+                    "mutations_tested": 3,
+                }
+            ]
+        },
+    )
+    output = tmp_path / "report.html"
+    html = generate_html(summary, output)
+    assert output.read_text(encoding="utf-8") == html
+    assert "#0d1117" in html
+    assert "100/100" in html
+    assert "target_app/app.py:37" in html
+    assert "420.0 ms" in html and "12.0 ms" in html
+    assert "<details>" in html and "gh pr create" in html
+
+
+def test_pr_template_contains_culprit_metrics_diff_proof_and_checklist(tmp_path) -> None:
+    incident = {
+        "sig_id": "sig-template",
+        "bug_class": "starvation",
+        "culprit": "target_app/app.py:72",
+        "strategy": "asyncio_lock_nonblocking",
+        "before": {"p50_ms": 10.0, "p95_ms": 500.0, "p99_ms": 900.0, "error_rate": 0.5, "survival_rate": 0.5},
+        "after": {"p50_ms": 8.0, "p95_ms": 12.0, "p99_ms": 15.0, "error_rate": 0.0, "survival_rate": 1.0},
+        "verdict": "PASS",
+        "escalation_passed": True,
+        "mutations_tested": 3,
+        "diff": "- with _inventory_lock:\n+ async with _inventory_lock:",
+        "escalation_details": [{"mutation": "numeric_boundary", "survived": True}],
+    }
+    path = generate_pr_template(incident, tmp_path / "prs")
+    content = path.read_text(encoding="utf-8")
+    assert path.name == "sig-template.md"
+    assert "target_app/app.py:72" in content
+    assert "| p99 latency | 900.0 ms | 15.0 ms |" in content
+    assert "LibCST" in content and "asyncio_lock_nonblocking" in content
+    assert "numeric_boundary" in content and "Approval checklist" in content

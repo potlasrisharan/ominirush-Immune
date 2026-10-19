@@ -7,6 +7,7 @@ import os
 import sys
 
 from omniimmune.arbiter import Arbiter
+from omniimmune.healer.git_branch import GitBranchEngine
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -20,6 +21,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 async def async_main(args: argparse.Namespace) -> int:
+    if args.fresh:
+        GitBranchEngine().cleanup_heal_branches()
     arbiter = Arbiter(
         target_url=os.getenv("TARGET_URL", "http://127.0.0.1:8000" if args.mode == "local" else "http://target:8000"),
         upstream_url=os.getenv("UPSTREAM_URL", "http://127.0.0.1:9000" if args.mode == "local" else "http://upstream:9000"),

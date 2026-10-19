@@ -127,6 +127,50 @@ def test_existing_branch_and_failed_verification_are_safe(tmp_path: Path) -> Non
     assert git(repo, "show-ref", "--verify", "--quiet", "refs/heads/heal/sig-failed", check=False) == ""
 
 
+def test_cleanup_removes_matching_heal_branches_without_touching_main(tmp_path: Path) -> None:
+    repo, _, base = make_repo(tmp_path)
+    git(repo, "branch", "heal/sig-test")
+    git(repo, "branch", "heal/sig-test-two")
+    git(repo, "branch", "keep/me")
+
+    deleted = GitBranchEngine(repo).cleanup_heal_branches()
+
+    assert deleted == ["heal/sig-test", "heal/sig-test-two"]
+    assert git(repo, "branch", "--show-current") == "main"
+    assert git(repo, "rev-parse", "HEAD") == base
+    assert git(repo, "show-ref", "--verify", "--quiet", "refs/heads/heal/sig-test", check=False) == ""
+    assert git(repo, "show-ref", "--verify", "--quiet", "refs/heads/heal/sig-test-two", check=False) == ""
+    assert git(repo, "rev-parse", "keep/me") == base
+    assert GitBranchEngine(repo).cleanup_heal_branches() == []
+
+
+def test_cleanup_skips_checked_out_heal_branch(tmp_path: Path) -> None:
+    repo, _, _ = make_repo(tmp_path)
+    git(repo, "branch", "heal/sig-test")
+    git(repo, "switch", "heal/sig-test")
+
+    assert GitBranchEngine(repo).cleanup_heal_branches() == []
+    assert git(repo, "branch", "--show-current") == "heal/sig-test"
+
+
+def test_overwrite_replaces_existing_heal_branch(tmp_path: Path) -> None:
+    repo, target, _ = make_repo(tmp_path)
+    original = target.read_text(encoding="utf-8")
+    engine = GitBranchEngine(repo)
+
+    first_patch = make_patch(target, original, "return 'first'\n")
+    engine.create_heal_branch("sig-overwrite", first_patch, verified_verdict())
+    first_commit = git(repo, "rev-parse", "heal/sig-overwrite")
+
+    second_patch = make_patch(target, original, "return 'second'\n")
+    branch = engine.create_heal_branch("sig-overwrite", second_patch, verified_verdict(), overwrite=True)
+
+    assert branch == "heal/sig-overwrite"
+    assert git(repo, "rev-parse", branch) != first_commit
+    assert git(repo, "show", f"{branch}:target_app.py") == "return 'second'"
+    assert git(repo, "branch", "--show-current") == "main"
+
+
 def test_invalid_target_and_missing_post_metrics_are_rejected(tmp_path: Path) -> None:
     repo, target, _ = make_repo(tmp_path)
     original = target.read_text(encoding="utf-8")

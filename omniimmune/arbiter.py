@@ -28,7 +28,7 @@ from omniimmune.models import (
     PatchResult,
     VerificationVerdict,
 )
-from omniimmune.report import ReportGenerator
+from omniimmune.report import ReportGenerator, generate_html, generate_pr_template
 from omniimmune.ui.hud import OmniHUD
 from omniimmune.verifier.verifier import VerifierEngine
 from omniimmune.verifier.escalation import EscalationEngine
@@ -280,6 +280,16 @@ class Arbiter:
         await self._restart_target()
         raise RuntimeError(f"No patch strategy verified for {signature.sig_id}")
 
+    def _escalation_details(self, sig_id: str) -> list[dict]:
+        """Return the replay evidence emitted for the most recent verification."""
+        for event in reversed(self.event_bus.history):
+            if event.type not in {EventType.ESCALATION_PASSED, EventType.ESCALATION_FAILED}:
+                continue
+            if event.data.get("sig_id") == sig_id:
+                details = event.data.get("details", [])
+                return details if isinstance(details, list) else []
+        return []
+
     async def run_closed_loop(self) -> ImmunitySummary:
         if self.fresh:
             self.memory.clear()
@@ -350,6 +360,7 @@ class Arbiter:
                         "verdict": "PASS" if verdict.passed else "FAIL",
                         "escalation_passed": verdict.escalation_passed,
                         "mutations_tested": verdict.mutations_tested,
+                        "escalation_details": self._escalation_details(signature.sig_id),
                         "diff": patch.diff,
                         "branch_status": "NOT_ATTEMPTED",
                         "branch": None,
@@ -411,7 +422,25 @@ class Arbiter:
                     "timeline": [event.model_dump(mode="json") for event in self.event_bus.history],
                     "patch_diffs": self._patch_diffs,
                 })
-                ReportGenerator(self.event_bus).generate(summary, os.getenv("OMNI_REPORT_PATH", str(self.root / "INCIDENT_REPORT.md")))
+                report_path = Path(os.getenv("OMNI_REPORT_PATH", str(self.root / "INCIDENT_REPORT.md")))
+                ReportGenerator(self.event_bus).generate(summary, report_path)
+                html_report_path = Path(
+                    os.getenv("OMNI_HTML_REPORT_PATH", str(self.root / "artifacts" / "report.html"))
+                )
+                generate_html(summary, html_report_path)
+                pr_dir = Path(os.getenv("OMNI_PR_DIR", str(self.root / "artifacts" / "prs")))
+                pr_template_paths = [
+                    str(generate_pr_template(incident, pr_dir))
+                    for incident in self._incidents
+                    if incident.get("verdict") == "PASS"
+                ]
+                summary = summary.model_copy(
+                    update={
+                        "report_path": str(report_path),
+                        "html_report_path": str(html_report_path),
+                        "pr_template_paths": pr_template_paths,
+                    }
+                )
                 await self.event_bus.publish(EventType.RUN_COMPLETE, summary.model_dump(mode="json"))
                 if hud:
                     hud.render_summary(summary)

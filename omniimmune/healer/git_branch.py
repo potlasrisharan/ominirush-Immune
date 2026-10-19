@@ -192,11 +192,54 @@ class GitBranchEngine:
         content = self._run(["git", "show", f"{original_head}:{relative_path}"]).stdout
         target.write_text(content, encoding="utf-8")
 
+    def _checked_out_branches(self) -> set[str]:
+        """Return local branch names checked out in any worktree."""
+        worktrees = self._run(["git", "worktree", "list", "--porcelain"]).stdout
+        checked_out: set[str] = set()
+        for line in worktrees.splitlines():
+            if line.startswith("branch refs/heads/"):
+                checked_out.add(line.removeprefix("branch refs/heads/"))
+        return checked_out
+
+    def _delete_branch(self, branch_name: str, checked_out: set[str] | None = None) -> bool:
+        """Delete a local branch unless it is checked out in a worktree."""
+        checked_out = self._checked_out_branches() if checked_out is None else checked_out
+        if branch_name in checked_out:
+            return False
+        result = self._run(["git", "branch", "-D", "--", branch_name], check=False)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            raise GitBranchError(f"Unable to delete repair branch {branch_name}: {detail}")
+        return True
+
+    def cleanup_heal_branches(self, prefix: str = "heal/sig-") -> list[str]:
+        """Delete matching local repair branches that are not checked out.
+
+        Branches checked out in the current worktree or any linked worktree are
+        left untouched.  An empty match set is a successful no-op.
+        """
+        self._resolve_repository()
+        branches = self._run(
+            ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/"]
+        ).stdout.splitlines()
+        matching = [branch for branch in branches if branch.startswith(prefix)]
+        if not matching:
+            return []
+
+        checked_out = self._checked_out_branches()
+        deleted: list[str] = []
+        for branch_name in matching:
+            if self._delete_branch(branch_name, checked_out):
+                deleted.append(branch_name)
+        return deleted
+
     def create_heal_branch(
         self,
         sig_id: str,
         patch_result: PatchResult,
         verdict: VerificationVerdict,
+        *,
+        overwrite: bool = False,
     ) -> str:
         self.last_branch_name = None
         self.last_commit_sha = None
@@ -207,7 +250,8 @@ class GitBranchEngine:
         branch_name = self.branch_name_for(sig_id)
         ref_name = f"refs/heads/{branch_name}"
         ref_check = self._run(["git", "show-ref", "--verify", "--quiet", ref_name], check=False)
-        if ref_check.returncode == 0:
+        branch_exists = ref_check.returncode == 0
+        if branch_exists and not overwrite:
             raise GitBranchError(f"Repair branch already exists; refusing to overwrite: {branch_name}")
         check_format = self._run(["git", "check-ref-format", "--branch", branch_name], check=False)
         if check_format.returncode != 0:
@@ -248,6 +292,11 @@ class GitBranchEngine:
                 env=isolated_env,
                 input_text=message,
             ).stdout.strip()
+            if branch_exists:
+                if not self._delete_branch(branch_name):
+                    raise GitBranchError(
+                        f"Repair branch is checked out; refusing to overwrite: {branch_name}"
+                    )
             update = self._run(
                 ["git", "update-ref", ref_name, commit, "0" * 40],
                 check=False,

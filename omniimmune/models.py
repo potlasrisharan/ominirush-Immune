@@ -147,6 +147,11 @@ class ImmunitySummary(BaseModel):
     incidents: list[dict[str, Any]] = Field(default_factory=list)
     timeline: list[dict[str, Any]] = Field(default_factory=list)
     patch_diffs: list[str] = Field(default_factory=list)
+    # Generated artifact locations are kept on the returned summary so callers
+    # can link directly to the dashboard and reviewer-ready PR bodies.
+    report_path: str | None = None
+    html_report_path: str | None = None
+    pr_template_paths: list[str] = Field(default_factory=list)
 
     @classmethod
     def compute(
