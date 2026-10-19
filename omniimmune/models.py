@@ -140,6 +140,9 @@ class ImmunitySummary(BaseModel):
     regression_passed: bool
     mean_survival_rate: float
     vaccinated_count: int
+    incidents: list[dict[str, Any]] = Field(default_factory=list)
+    timeline: list[dict[str, Any]] = Field(default_factory=list)
+    patch_diffs: list[str] = Field(default_factory=list)
 
     @classmethod
     def compute(

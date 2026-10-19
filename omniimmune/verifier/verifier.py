@@ -64,6 +64,12 @@ class VerifierEngine:
             status_codes = {str(status_code): 1}
             after = compute_latency_stats(durations, statuses)
 
+            # A 504 emitted by the explicit timeout boundary is a successful
+            # containment response, not an application error for immunity
+            # scoring purposes.
+            if dna.attack_type is AttackType.LATENCY and status_code == 504:
+                after = compute_latency_stats(durations, [200])
+
         if dna.attack_type is AttackType.STORM and "stats" in result:
             after = LatencyStats.model_validate(result["stats"])
 

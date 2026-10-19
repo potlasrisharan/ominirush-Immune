@@ -73,5 +73,5 @@ async def replay(dna, target_url: str, client=None, **kwargs) -> dict:
     if attack_type is AttackType.STORM:
         return await StormLoad(seed=dna.seed).execute(target_url, dna, client=client, **kwargs)
     if attack_type is AttackType.LATENCY:
-        return await LatencyDriftAgent().execute(target_url, dna, client=client, **kwargs)
+        return await LatencyDriftAgent(seed=dna.seed).execute(target_url, dna, client=client, **kwargs)
     raise ValueError(f"Unsupported attack type: {attack_type}")

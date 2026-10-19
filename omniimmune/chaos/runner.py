@@ -66,7 +66,7 @@ class RedSwarmRunner:
                 sla_ms=self.sla_ms,
             )
         else:
-            dna, result = await LatencyDriftAgent().run(
+            dna, result = await LatencyDriftAgent(seed=self.seed).run(
                 self.target_url,
                 client=client,
                 delay_seconds=self.latency_delay,

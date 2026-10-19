@@ -1,0 +1,10 @@
+.git
+.github
+.venv
+.pytest_cache
+__pycache__
+*.py[cod]
+.DS_Store
+artifacts
+INCIDENT_REPORT.md
+.opencode/omnirush/inbox

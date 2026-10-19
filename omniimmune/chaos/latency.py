@@ -147,6 +147,9 @@ class LatencyProxy:
 
 
 class LatencyDriftAgent:
+    def __init__(self, seed: int = 1337) -> None:
+        self.seed = seed
+
     def build_dna(self, delay_seconds: float = 4.0) -> AttackDNA:
         return AttackDNA(
             attack_type=AttackType.LATENCY,
@@ -154,7 +157,7 @@ class LatencyDriftAgent:
             http_method="GET",
             delay_seconds=delay_seconds,
             query_params={"delay": str(delay_seconds)},
-            seed=1337,
+            seed=self.seed,
         )
 
     async def execute(

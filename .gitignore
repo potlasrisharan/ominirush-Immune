@@ -43,3 +43,4 @@ htmlcov/
 .omni_memory/
 artifacts/
 *.log
+INCIDENT_REPORT.md

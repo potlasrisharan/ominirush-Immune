@@ -1,0 +1,68 @@
+services:
+  upstream:
+    build:
+      context: ./upstream
+      dockerfile: Dockerfile
+    container_name: omniimmune-upstream
+    expose:
+      - "9000"
+    networks:
+      - omni_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  target:
+    build:
+      context: ./target_app
+      dockerfile: Dockerfile
+    container_name: omniimmune-target
+    restart: unless-stopped
+    environment:
+      UPSTREAM_URL: http://upstream:9000
+    expose:
+      - "8000"
+    volumes:
+      - ./target_app:/app
+    networks:
+      - omni_net
+    depends_on:
+      upstream:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  omniimmune:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: omniimmune-arbiter
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./target_app:/app/target_app
+      - .:/app/workspace
+    working_dir: /app
+    environment:
+      OMNI_SEED: "1337"
+      OMNI_MODE: docker
+      UPSTREAM_URL: http://upstream:9000
+      TARGET_URL: http://target:8000
+      OMNI_TARGET_CONTAINER: omniimmune-target
+      OMNI_COMPOSE_LIVE_RELOAD: "1"
+      OMNI_REPORT_PATH: /app/workspace/INCIDENT_REPORT.md
+      OMNI_MEMORY_DIR: /app/workspace/artifacts/memory
+    tty: true
+    networks:
+      - omni_net
+    depends_on:
+      target:
+        condition: service_healthy
+
+networks:
+  omni_net:
+    name: omni_net
