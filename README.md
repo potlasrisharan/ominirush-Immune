@@ -1,5 +1,10 @@
 # OmniResilience · Phase 4
 
+[![CI Status](https://github.com/potlasrisharan/ominirush-Immune/actions/workflows/ci.yml/badge.svg)](https://github.com/potlasrisharan/ominirush-Immune/actions/workflows/ci.yml)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Tests](https://img.shields.io/badge/tests-51%2F51%20passing-brightgreen.svg)](https://github.com/potlasrisharan/ominirush-Immune/actions/workflows/ci.yml)
+
 OmniResilience is a deterministic closed-loop resilience demo. The Red Swarm
 breaks a deliberately vulnerable FastAPI target, the Blue Swarm triages the
 failure and applies a LibCST patch, and the Arbiter replays the exact
