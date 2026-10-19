@@ -70,11 +70,60 @@ flowchart LR
    tries the smallest CST transformer first, rolling back on failed proof.
 4. **Prove it:** the target is restarted, the exact DNA is replayed, and the
    golden endpoints are checked again. Verified patches are stored in Immune
-   Memory and included in the incident report.
+   Memory and included in the incident report. Passing repairs then continue
+   through the adversarial escalation round and Git audit persistence described
+   below.
 
 Run 1 heals all three bugs. Run 2 sees the same signatures and loads the
 verified patches immediately, which is shown as a `MEMORY_HIT` / vaccinated
 count in the HUD and JSON summary.
+
+## Adversarial Escalation Round
+
+After the exact triggering `AttackDNA` passes baseline verification and golden
+regression, the `EscalationEngine` runs a deterministic mutation-testing round
+to check generalized immunity. Each incident receives exactly three bounded
+mutations with independently regenerated DNA identities:
+
+- JSON order requests exercise a numeric boundary, a Unicode/injection-shaped
+  value, and nested type confusion.
+- Inventory stress requests vary concurrency and request count within fixed
+  limits.
+- Query-driven requests vary the relevant `delay` parameter, including a
+  bounded malformed value.
+
+Every mutation must complete within the execution budget, leave the target
+healthy, and return an accepted success or validation response. A controlled
+HTTP 504 from the payment timeout guard is accepted as containment. The Arbiter
+keeps baseline verification and generalized-immunity certification distinct:
+`escalation_passed` is only set after all mutations survive. Lifecycle events
+(`escalation_started`, `escalation_passed`, and `escalation_failed`) appear in
+the event timeline, HUD state, and generated `INCIDENT_REPORT.md`.
+
+## Auto-Branching Git Engine
+
+Every verified repair is persisted as an auditable, isolated Git branch named
+`heal/<sanitized_sig_id>`, for example `heal/sig-order-panic-01`. The
+`GitBranchEngine`:
+
+1. Validates the repository, active symbolic branch, target path, tracked-file
+   status, and verification gate.
+2. Builds a commit from the original `HEAD` plus only the patched target file
+   using a temporary Git index. Unrelated staged, unstaged, and untracked work
+   is preserved.
+3. Creates the branch without checking it out, so the original branch and
+   `HEAD` remain active and unchanged. The patched target file is restored on
+   the original worktree after the branch commit is saved.
+4. Refuses detached or conflicted repositories, invalid paths, failed or
+   incomplete verification, existing repair branches, and unsafe branch names.
+
+The audit commit records the signature ID, triggering DNA ID and SHA-256,
+original branch, base commit, target file, patch strategy, pre-heal error rate,
+post-heal survival rate, p99 latency, baseline verification, escalation status,
+golden regression, and `OmniImmune Engine` attribution. The terminal HUD shows
+the actual branch and short commit SHA. The incident report records `CREATED`,
+`FAILED`, or `NOT_ATTEMPTED` accurately; a Git persistence failure never gets
+reported as a successful commit.
 
 ## CLI
 
