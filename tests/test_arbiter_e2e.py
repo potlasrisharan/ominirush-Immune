@@ -30,6 +30,9 @@ def test_local_closed_loop_heals_all_vectors_and_reuses_memory(tmp_path: Path, m
         )
         assert first.score == 100
         assert first.incidents_total == first.incidents_verified == 3
+        assert all(incident["escalation_passed"] is True for incident in first.incidents)
+        assert all(incident["mutations_tested"] == 3 for incident in first.incidents)
+        assert sum(event["type"] == "escalation_passed" for event in first.timeline) == 3
         assert (tmp_path / "INCIDENT_REPORT.md").exists()
 
         second = asyncio.run(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sys
 import time
@@ -29,6 +30,10 @@ from omniimmune.models import (
 from omniimmune.report import ReportGenerator
 from omniimmune.ui.hud import OmniHUD
 from omniimmune.verifier.verifier import VerifierEngine
+from omniimmune.verifier.escalation import EscalationEngine
+
+
+logger = logging.getLogger(__name__)
 
 
 class Arbiter:
@@ -55,6 +60,7 @@ class Arbiter:
         self.target_file = self.root / "target_app" / "app.py"
         self.memory = ImmuneMemory(os.getenv("OMNI_MEMORY_DIR", str(self.root / "artifacts" / "memory")))
         self.event_bus = EventBus()
+        self.escalation = EscalationEngine(seed=seed)
         self.git_engine = GitBranchEngine(self.root)
         self._processes: list[asyncio.subprocess.Process] = []
         self._owns_services = False
@@ -198,6 +204,47 @@ class Arbiter:
         ladder: PatchLadder,
         pristine: str,
     ) -> tuple[PatchResult, VerificationVerdict]:
+        async def verify_candidate(patch: PatchResult) -> VerificationVerdict:
+            baseline = await verifier.verify_attack_dna(dna, signature.sig_id, patch.strategy, client)
+            if not baseline.passed:
+                return baseline
+
+            await self.event_bus.publish(
+                EventType.ESCALATION_STARTED,
+                {"sig_id": signature.sig_id, "dna_id": dna.dna_id, "strategy": patch.strategy},
+            )
+            try:
+                escalation = await self.escalation.run_escalation(self.target_url, dna, client)
+            except Exception as exc:
+                escalation = {
+                    "all_survived": False,
+                    "mutations_tested": 0,
+                    "details": [],
+                    "error": str(exc) or exc.__class__.__name__,
+                }
+            escalation_passed = bool(escalation.get("all_survived"))
+            verdict = baseline.model_copy(
+                update={
+                    "passed": baseline.passed and escalation_passed,
+                    "escalation_passed": escalation_passed,
+                    "mutations_tested": int(escalation.get("mutations_tested", 0)),
+                }
+            )
+            event_data = {
+                "sig_id": signature.sig_id,
+                "dna_id": dna.dna_id,
+                "strategy": patch.strategy,
+                "mutations_tested": verdict.mutations_tested,
+                "details": escalation.get("details", []),
+            }
+            if escalation_passed:
+                await self.event_bus.publish(EventType.ESCALATION_PASSED, event_data)
+                logger.info("GENERALIZED IMMUNITY CONFIRMED")
+            else:
+                event_data["error"] = escalation.get("error")
+                await self.event_bus.publish(EventType.ESCALATION_FAILED, event_data)
+            return verdict
+
         cached = self.memory.get_patch(signature.sig_id)
         if cached:
             modified_source = cached.get("modified_source")
@@ -213,7 +260,7 @@ class Arbiter:
             )
             await self.event_bus.publish(EventType.MEMORY_HIT, {"sig_id": signature.sig_id, "strategy": patch.strategy})
             await self._restart_target()
-            verdict = await verifier.verify_attack_dna(dna, signature.sig_id, patch.strategy, client)
+            verdict = await verify_candidate(patch)
             return patch, verdict
 
         for index in range(len(ladder.STRATEGIES[signature.bug_class])):
@@ -223,7 +270,7 @@ class Arbiter:
             await event_publish(self.event_bus, EventType.PATCH_APPLIED, patch.model_dump(mode="json"))
             self._patch_diffs.append(patch.diff)
             await self._restart_target()
-            verdict = await verifier.verify_attack_dna(dna, signature.sig_id, patch.strategy, client)
+            verdict = await verify_candidate(patch)
             if verdict.passed:
                 return patch, verdict
             await self.event_bus.publish(EventType.ROLLED_BACK, {"sig_id": signature.sig_id, "strategy": patch.strategy})
@@ -297,6 +344,8 @@ class Arbiter:
                         "before": before.model_dump(),
                         "after": verdict.after.model_dump(),
                         "verdict": "PASS" if verdict.passed else "FAIL",
+                        "escalation_passed": verdict.escalation_passed,
+                        "mutations_tested": verdict.mutations_tested,
                         "diff": patch.diff,
                         "branch_status": "NOT_ATTEMPTED",
                         "branch": None,
