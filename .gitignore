@@ -44,3 +44,4 @@ htmlcov/
 artifacts/
 *.log
 INCIDENT_REPORT.md
+.opencode/
