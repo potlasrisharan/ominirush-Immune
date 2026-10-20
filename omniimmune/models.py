@@ -146,6 +146,7 @@ class ImmunitySummary(BaseModel):
     regression_passed: bool
     mean_survival_rate: float
     vaccinated_count: int
+    execution_elapsed_seconds: float = 0.0
     incidents: list[dict[str, Any]] = Field(default_factory=list)
     timeline: list[dict[str, Any]] = Field(default_factory=list)
     patch_diffs: list[str] = Field(default_factory=list)
@@ -154,6 +155,22 @@ class ImmunitySummary(BaseModel):
     report_path: str | None = None
     html_report_path: str | None = None
     pr_template_paths: list[str] = Field(default_factory=list)
+
+    def formatted_duration(self) -> str:
+        """Return execution time as a compact, human-readable duration."""
+        total_seconds = max(0, int(self.execution_elapsed_seconds))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours:
+            return f"{hours}h {minutes}m {seconds}s"
+        if minutes:
+            return f"{minutes}m {seconds}s"
+        return f"{seconds}s"
+
+    def summary_badge(self) -> str:
+        """Return a concise status badge for reports and dashboards."""
+        status = "VACCINATED" if self.score >= 100 else "AT RISK"
+        return f"[{status} {self.score}/100]"
 
     @classmethod
     def compute(

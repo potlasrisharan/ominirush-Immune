@@ -84,6 +84,30 @@ def test_immunity_summary_formula_and_empty_run() -> None:
     assert empty.score == 0
 
 
+def test_immunity_summary_formats_execution_duration() -> None:
+    summary = ImmunitySummary.compute(
+        incidents_total=1,
+        incidents_verified=1,
+        regression_passed=True,
+        mean_survival_rate=1.0,
+    ).model_copy(update={"execution_elapsed_seconds": 84})
+
+    assert summary.formatted_duration() == "1m 24s"
+
+
+def test_immunity_summary_returns_status_badge() -> None:
+    vaccinated = ImmunitySummary.compute(
+        incidents_total=1,
+        incidents_verified=1,
+        regression_passed=True,
+        mean_survival_rate=1.0,
+    )
+    at_risk = vaccinated.model_copy(update={"score": 80})
+
+    assert vaccinated.summary_badge() == "[VACCINATED 100/100]"
+    assert at_risk.summary_badge() == "[AT RISK 80/100]"
+
+
 @pytest.mark.asyncio
 async def test_event_bus_order_wildcard_history_and_isolation(caplog) -> None:
     bus = EventBus()
