@@ -30,6 +30,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-ui", action="store_true", help="disable Rich HUD output")
     parser.add_argument("--json", action="store_true", help="print the final ImmunitySummary as JSON")
     parser.add_argument(
+        "--push-pr",
+        action="store_true",
+        help="push verified heal branches and open GitHub pull requests with gh",
+    )
+    parser.add_argument(
         "--serve-dashboard",
         nargs="?",
         const=DEFAULT_DASHBOARD_PORT,
@@ -54,12 +59,15 @@ async def async_main(args: argparse.Namespace) -> int:
         seed=args.seed,
         fresh=args.fresh,
         no_ui=args.no_ui or args.json,
+        push_pr=args.push_pr,
     )
     summary = await arbiter.run_closed_loop()
     if args.json:
         print(json.dumps(summary.model_dump(mode="json"), sort_keys=True))
     elif args.no_ui:
         print(f"Immunity score: {summary.score}/100 ({summary.incidents_verified}/{summary.incidents_total} verified)")
+    if args.push_pr and any(incident.get("pr_status") == "FAILED" for incident in summary.incidents):
+        return 1
     return 0 if summary.score == 100 else 1
 
 

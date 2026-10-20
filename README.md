@@ -157,10 +157,19 @@ reported as a successful commit.
 --fresh               Clear cached immune signatures before running
 --no-ui               Stream no HUD output; useful in CI
 --json                Emit the final ImmunitySummary as JSON
+--push-pr             Push verified `heal/*` branches and create pull requests with `gh`
 --serve-dashboard [PORT]
                       Serve the browser dashboard without running chaos
                       (default port when supplied without a value: 8080)
 ```
+
+`--push-pr` is opt-in. It requires an `origin` remote and a locally
+authenticated GitHub CLI (`gh auth status`). Each verified repair is pushed
+without force-updating an existing remote branch, then opened with the
+generated `artifacts/prs/<signature>.md` body. A push or PR failure is recorded
+in the incident report and JSON timeline while the verified heal run still
+completes and exits non-zero; no access token is read or written by
+OmniImmune.
 
 ## Docker notes
 

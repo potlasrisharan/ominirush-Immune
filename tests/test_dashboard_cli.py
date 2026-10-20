@@ -31,6 +31,11 @@ def test_serve_dashboard_port_is_optional_and_validated() -> None:
         parse_args(["--serve-dashboard", "0"])
 
 
+def test_push_pr_is_explicitly_opt_in() -> None:
+    assert parse_args([]).push_pr is False
+    assert parse_args(["--push-pr"]).push_pr is True
+
+
 def test_serve_dashboard_starts_without_running_chaos_loop() -> None:
     port = free_port()
     process = subprocess.Popen(

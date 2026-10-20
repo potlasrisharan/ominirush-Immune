@@ -363,8 +363,17 @@ class ReportGenerator:
                     f"- Escalation Verification: {incident.get('escalation_verification', 'NOT_AVAILABLE')}",
                 ]
             )
+            if "push_status" in incident or "pr_status" in incident:
+                lines.extend(
+                    [
+                        f"- Push Status: {incident.get('push_status', 'NOT_ATTEMPTED')}",
+                        f"- Pull Request: {_sanitize_report_text(incident.get('pr_url') or incident.get('pr_status', 'NOT_ATTEMPTED'))}",
+                    ]
+                )
             if incident.get("git_error"):
                 lines.append(f"- Git Error: {_sanitize_report_text(incident['git_error'])}")
+            if incident.get("pr_error"):
+                lines.append(f"- Push/PR Error: {_sanitize_report_text(incident['pr_error'])}")
             lines.append("")
 
         lines.extend(["", "## Applied Patches", ""])
