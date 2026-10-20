@@ -551,14 +551,16 @@ async def main():
                 "-of", "default=noprint_wrappers=1:nokey=1", str(full_voice)
             ]
             total_audio = float(subprocess.check_output(dur_cmd).decode().strip())
+            video_duration = math.ceil(total_audio)
             # Distribute scene durations based on standard proportions
             proportions = [20.5, 18.7, 24.5, 23.9, 16.7, 16.7]
             prop_sum = sum(proportions)
-            scene_durations = [(p / prop_sum) * 120.0 for p in proportions]
+            scene_durations = [(p / prop_sum) * video_duration for p in proportions]
         else:
             voice_chunks = await generate_voiceovers(work)
             total_audio = sum(dur for _, dur in voice_chunks)
-            padding_per_scene = (120.0 - total_audio) / len(voice_chunks)
+            video_duration = 120.0
+            padding_per_scene = (video_duration - total_audio) / len(voice_chunks)
             scene_durations = [dur + padding_per_scene for _, dur in voice_chunks]
 
             concat_file = work / "voice_concat.txt"
@@ -592,7 +594,7 @@ async def main():
             str(silent_video)
         ], check=True, cwd=ROOT)
 
-        synth_music = make_ambient_soundtrack(work, 120.0)
+        synth_music = make_ambient_soundtrack(work, video_duration)
 
         # Mux Video + Voice + Ambient Audio Bed
         OUTPUT.parent.mkdir(parents=True, exist_ok=True)
@@ -603,11 +605,11 @@ async def main():
             "-i", str(full_voice),
             "-i", str(synth_music),
             "-filter_complex",
-            "[1:a]apad=pad_dur=120,atrim=duration=120,volume=1.3[voice];"
-            "[2:a]atrim=duration=120,volume=0.3[music];"
+            f"[1:a]apad=pad_dur={video_duration},atrim=duration={video_duration},volume=1.3[voice];"
+            f"[2:a]atrim=duration={video_duration},volume=0.3[music];"
             "[voice][music]amix=inputs=2:duration=first[aout]",
             "-map", "0:v", "-map", "[aout]",
-            "-t", "120",
+            "-t", str(video_duration),
             "-c:v", "copy",
             "-c:a", "aac", "-b:a", "256k",
             "-movflags", "+faststart",
