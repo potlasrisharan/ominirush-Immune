@@ -174,6 +174,16 @@ make dashboard
 # http://127.0.0.1:8080/dashboard
 ```
 
+## Track Alignment: Systems, Infrastructure & Cybersecurity
+
+OmniImmune is designed for the **Systems, Infrastructure & Cybersecurity** track because it treats resilience as a controlled systems problem: attack the service, repair the implementation, and refuse to declare success until the repair survives independent proof.
+
+- **Autonomous self-healing:** The Red Swarm generates deterministic failures from real API contracts, while the Blue Swarm triages traceback and AST evidence and selects a minimal LibCST repair. The Arbiter restarts the target, replays the exact incident, checks golden paths, and escalates through three mutations without requiring an operator to hand-edit the service.
+- **Zero-trust memory:** Verified repairs are stored as immune memory only after HMAC-SHA256 authentication over the incident signature, patch strategy, base-file digest, and modified source. Tampered or stale cache entries are rejected and routed back through clean triage rather than executed as trusted code.
+- **AST patch verification:** LibCST transformations operate on Python syntax trees instead of fragile text substitutions, preserving source structure and formatting. Every patch is compiled, replay-verified, regression-tested, adversarially escalated, and committed through an isolated temporary Git index with provenance.
+
+This creates a verifiable infrastructure control loop: **chaos signal → semantic repair → cryptographic memory → repeatable proof**.
+
 ## CLI reference
 
 ```text
