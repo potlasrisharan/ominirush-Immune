@@ -52,6 +52,7 @@ class Arbiter:
         no_ui: bool = False,
         push_pr: bool = False,
         llm_patcher: LLMFallbackPatcher | None = None,
+        include_leak: bool = False,
     ) -> None:
         if mode not in {"docker", "local"}:
             raise ValueError("mode must be docker or local")
@@ -76,6 +77,7 @@ class Arbiter:
         # provider transport.  The fallback itself remains a no-op without a
         # supported environment key.
         self.llm_patcher = llm_patcher or LLMFallbackPatcher(self.target_file)
+        self.include_leak = include_leak
 
     async def _is_ready(self, url: str) -> bool:
         try:
@@ -422,7 +424,12 @@ class Arbiter:
                     raise RuntimeError("Golden baseline check failed")
                 if hud:
                     hud.update_telemetry(status="baseline healthy", cpu_percent=0.0, mem_mb=0.0, connections=0)
-                for vector in AttackType:
+                vectors = list(AttackType) if self.include_leak else [
+                    AttackType.FUZZ,
+                    AttackType.STORM,
+                    AttackType.LATENCY,
+                ]
+                for vector in vectors:
                     total += 1
                     dna, result = await runner.run_vector(vector, client=client)
                     if hud:
