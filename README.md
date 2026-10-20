@@ -7,7 +7,7 @@
 [![CI](https://github.com/potlasrisharan/ominirush-Immune/actions/workflows/ci.yml/badge.svg)](https://github.com/potlasrisharan/ominirush-Immune/actions/workflows/ci.yml)
 [![Python 3.12.8](https://img.shields.io/badge/python-3.12.8-3776AB?logo=python&logoColor=white&style=flat-square)](https://www.python.org/downloads/release/python-3128/)
 [![Docker Compose v2](https://img.shields.io/badge/docker%20compose-v2-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/compose/)
-[![Tests](https://img.shields.io/badge/tests-92%2F92%20passing-16A34A?style=flat-square)](https://github.com/potlasrisharan/ominirush-Immune/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-95%2F95%20passing-16A34A?style=flat-square)](https://github.com/potlasrisharan/ominirush-Immune/actions/workflows/ci.yml)
 [![Immunity](https://img.shields.io/badge/immunity%20score-100%2F100-00A86B?style=flat-square)](INCIDENT_REPORT.md)
 [![Architecture](https://img.shields.io/badge/architecture-clean%20%2B%20zero--trust%20memory-111827?style=flat-square)](#architecture)
 [![License](https://img.shields.io/badge/license-Apache%202.0-2F80ED?style=flat-square)](LICENSE)
@@ -222,7 +222,7 @@ The canonical offline command is:
 make test
 ```
 
-The 92-test suite covers:
+The 95-test suite covers:
 
 - OpenAPI schema traversal and deterministic payload synthesis.
 - Fuzz, concurrency storm, latency proxy, and memory-pressure agents.
