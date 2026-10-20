@@ -32,7 +32,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--push-pr",
         action="store_true",
-        help="push verified heal branches and open GitHub pull requests with gh",
+        help="automatically push verified heal branches and create GitHub Pull Requests via gh CLI",
     )
     parser.add_argument(
         "--serve-dashboard",
