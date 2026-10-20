@@ -409,7 +409,18 @@ class GitBranchEngine:
             with tempfile.NamedTemporaryFile(prefix="omniimmune-index-", delete=False) as index_file:
                 temporary_index = index_file.name
             os.unlink(temporary_index)
-            isolated_env = {**os.environ, "GIT_INDEX_FILE": temporary_index}
+            # ``commit-tree`` does not consult the repository config when the
+            # isolated Docker checkout has no user identity.  Supply a stable
+            # engine identity through the subprocess environment instead of
+            # mutating global or repository Git configuration.
+            isolated_env = {
+                **os.environ,
+                "GIT_INDEX_FILE": temporary_index,
+                "GIT_AUTHOR_NAME": os.getenv("GIT_AUTHOR_NAME", "OmniImmune Engine"),
+                "GIT_AUTHOR_EMAIL": os.getenv("GIT_AUTHOR_EMAIL", "omniimmune-engine@localhost"),
+                "GIT_COMMITTER_NAME": os.getenv("GIT_COMMITTER_NAME", "OmniImmune Engine"),
+                "GIT_COMMITTER_EMAIL": os.getenv("GIT_COMMITTER_EMAIL", "omniimmune-engine@localhost"),
+            }
             self._run(["git", "read-tree", original_head], env=isolated_env)
             self._run(["git", "add", "--", relative_path], env=isolated_env)
             tree = self._run(["git", "write-tree"], env=isolated_env).stdout.strip()

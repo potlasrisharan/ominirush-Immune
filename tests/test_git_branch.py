@@ -101,6 +101,22 @@ def test_verified_patch_creates_isolated_branch_and_restores_original_worktree(t
     assert "Verified by: OmniImmune Engine" in message
 
 
+def test_branch_commit_supplies_identity_without_git_config(tmp_path: Path) -> None:
+    repo, target, _ = make_repo(tmp_path)
+    git(repo, "config", "--unset", "user.name", check=False)
+    git(repo, "config", "--unset", "user.email", check=False)
+    original = target.read_text(encoding="utf-8")
+    patch = make_patch(target, original, "return 'contained'\n")
+
+    branch = GitBranchEngine(repo).create_heal_branch(
+        "sig-order-panic-identity", patch, verified_verdict()
+    )
+
+    assert git(repo, "show", "-s", "--format=%an <%ae>", branch) == (
+        "OmniImmune Engine <omniimmune-engine@localhost>"
+    )
+
+
 def test_branch_name_sanitization_is_deterministic_and_validated() -> None:
     assert GitBranchEngine.branch_name_for("sig-order-panic-01") == "heal/sig-order-panic-01"
     assert GitBranchEngine.branch_name_for("sig/order panic #01") == "heal/sig-order-panic-01"
