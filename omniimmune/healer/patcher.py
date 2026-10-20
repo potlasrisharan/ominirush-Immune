@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
+import os
+import re
+import urllib.error
+import urllib.request
 from pathlib import Path
+from typing import Any, Callable
 
 import libcst as cst
 
@@ -306,12 +312,295 @@ class FallbackTransformer(cst.CSTTransformer):
         return updated_node.with_changes(body=cst.IndentedBlock(body=[fallback, *updated_node.body.body]))
 
 
+class BoundedCacheTransformer(cst.CSTTransformer):
+    """Turn simple dictionary caches into bounded, eviction-aware caches.
+
+    The transformer deliberately only touches names containing ``cache``.  It
+    therefore remains safe for arbitrary target applications while covering
+    the common ``cache = {}; cache[key] = value`` resource exhaustion bug.
+    """
+
+    def __init__(self, max_entries: int = 128) -> None:
+        self.max_entries = max_entries
+        self.cache_names: set[str] = set()
+
+    @staticmethod
+    def _cache_name(target: cst.BaseExpression) -> str | None:
+        if isinstance(target, cst.Name) and "cache" in target.value.lower():
+            return target.value
+        return None
+
+    def leave_Assign(self, original_node: cst.Assign, updated_node: cst.Assign) -> cst.Assign:
+        if len(original_node.targets) != 1:
+            return updated_node
+        target = original_node.targets[0].target
+        name = self._cache_name(target)
+        if name is None:
+            return updated_node
+        if isinstance(original_node.value, cst.Dict):
+            self.cache_names.add(name)
+            return updated_node.with_changes(
+                value=cst.Call(func=_name("OrderedDict"), args=[])
+            )
+        return updated_node
+
+    def leave_AnnAssign(
+        self, original_node: cst.AnnAssign, updated_node: cst.AnnAssign
+    ) -> cst.AnnAssign:
+        name = self._cache_name(original_node.target)
+        if name is None or not isinstance(original_node.value, cst.Dict):
+            return updated_node
+        self.cache_names.add(name)
+        return updated_node.with_changes(value=cst.Call(func=_name("OrderedDict"), args=[]))
+
+    def leave_SimpleStatementLine(
+        self,
+        original_node: cst.SimpleStatementLine,
+        updated_node: cst.SimpleStatementLine,
+    ) -> cst.BaseStatement | cst.FlattenSentinel[cst.BaseStatement]:
+        # Add eviction immediately after cache[key] = value.  This keeps the
+        # policy local and works for both module-level and function caches.
+        if len(original_node.body) != 1 or not isinstance(original_node.body[0], cst.Assign):
+            return updated_node
+        assignment = original_node.body[0]
+        if len(assignment.targets) != 1 or not isinstance(assignment.targets[0].target, cst.Subscript):
+            return updated_node
+        subscript = assignment.targets[0].target
+        if not isinstance(subscript.value, cst.Name) or subscript.value.value not in self.cache_names:
+            return updated_node
+        name = subscript.value.value
+        guard = cst.parse_statement(
+            f"if len({name}) > {self.max_entries}:\n"
+            f"    {name}.popitem(last=False)\n"
+        )
+        return cst.FlattenSentinel([updated_node, guard])
+
+
+def _strip_markdown(response: str) -> str:
+    """Extract a diff from a fenced markdown response without executing it."""
+    value = response.strip()
+    fenced = re.fullmatch(r"```(?:diff|patch)?\s*\n(.*?)\n?```", value, re.DOTALL | re.IGNORECASE)
+    if fenced:
+        return fenced.group(1).strip("\n") + "\n"
+    return value + ("\n" if value and not value.endswith("\n") else "")
+
+
+def _response_text(response: Any) -> str | None:
+    if isinstance(response, str):
+        return response
+    if not isinstance(response, dict):
+        return None
+    # OpenAI-compatible and Gemini response shapes, plus a useful simple mock
+    # shape (``{"diff": "..."}``) for offline tests.
+    if isinstance(response.get("diff"), str):
+        return response["diff"]
+    choices = response.get("choices")
+    if isinstance(choices, list) and choices:
+        message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+        if isinstance(message, dict) and isinstance(message.get("content"), str):
+            return message["content"]
+    candidates = response.get("candidates")
+    if isinstance(candidates, list) and candidates:
+        content = candidates[0].get("content", {}) if isinstance(candidates[0], dict) else {}
+        parts = content.get("parts", []) if isinstance(content, dict) else []
+        if isinstance(parts, list):
+            text = "".join(part.get("text", "") for part in parts if isinstance(part, dict))
+            return text or None
+    return None
+
+
+def _apply_unified_diff(source: str, diff: str, target_file: Path) -> str | None:
+    """Apply a single-file unified diff in memory, rejecting malformed input."""
+    lines = diff.splitlines(keepends=True)
+    if len(lines) < 3 or not lines[0].startswith("--- ") or not lines[1].startswith("+++ "):
+        return None
+
+    def header_path(line: str, prefix: str) -> str | None:
+        if not line.startswith(prefix):
+            return None
+        return line[len(prefix):].split("\t", 1)[0].strip()
+
+    old_path, new_path = header_path(lines[0], "--- "), header_path(lines[1], "+++ ")
+    if not old_path or not new_path or old_path == "/dev/null" or new_path == "/dev/null":
+        return None
+    expected = {target_file.name, target_file.as_posix()}
+    try:
+        expected.add(target_file.resolve().relative_to(Path(__file__).resolve().parents[2]).as_posix())
+    except ValueError:
+        pass
+    if old_path.removeprefix("a/") not in expected or new_path.removeprefix("b/") not in expected:
+        return None
+
+    source_lines = source.splitlines(keepends=True)
+    output: list[str] = []
+    source_pos = 0
+    index = 2
+    hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+    while index < len(lines):
+        match = hunk_re.match(lines[index].rstrip("\n"))
+        if not match:
+            return None
+        old_start = int(match.group(1))
+        old_count = int(match.group(2) or "1")
+        if old_start < 1 or old_start - 1 < source_pos or old_start - 1 > len(source_lines):
+            return None
+        output.extend(source_lines[source_pos : old_start - 1])
+        source_pos = old_start - 1
+        index += 1
+        consumed = 0
+        while index < len(lines) and not lines[index].startswith("@@ "):
+            line = lines[index]
+            if line.startswith("\\ No newline"):
+                index += 1
+                continue
+            if not line:
+                return None
+            marker, content = line[0], line[1:]
+            if marker == " ":
+                if source_pos >= len(source_lines) or source_lines[source_pos].rstrip("\r\n") != content.rstrip("\r\n"):
+                    return None
+                output.append(source_lines[source_pos])
+                source_pos += 1
+                consumed += 1
+            elif marker == "-":
+                if source_pos >= len(source_lines) or source_lines[source_pos].rstrip("\r\n") != content.rstrip("\r\n"):
+                    return None
+                source_pos += 1
+                consumed += 1
+            elif marker == "+":
+                output.append(content)
+            else:
+                return None
+            index += 1
+        if consumed != old_count:
+            return None
+    output.extend(source_lines[source_pos:])
+    return "".join(output)
+
+
+class LLMFallbackPatcher:
+    """Optional, strictly validated LLM repair fallback.
+
+    The default transport is intentionally tiny and dependency-free.  Tests and
+    embedders can inject ``llm_call``; no provider is contacted without one of
+    the supported environment keys.
+    """
+
+    def __init__(
+        self,
+        target_file: Path | str = "target_app/app.py",
+        llm_call: Callable[..., Any] | None = None,
+        client: Callable[..., Any] | None = None,
+        llm: Callable[..., Any] | None = None,
+        max_prompt_chars: int = 120_000,
+    ) -> None:
+        self.target_file = Path(target_file)
+        self.llm_call = llm_call or client or llm
+        self.max_prompt_chars = max_prompt_chars
+        self.last_modified_source: str | None = None
+
+    def _credential(self) -> tuple[str, str] | None:
+        for variable, provider in (("OMNI_LLM_KEY", "openai"), ("OPENAI_API_KEY", "openai"), ("GEMINI_API_KEY", "gemini")):
+            key = os.getenv(variable, "").strip()
+            if key:
+                return provider, key
+        return None
+
+    def build_prompt(
+        self,
+        source: str,
+        bug_class: BugClass | str,
+        sig_id: str,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        bug_value = bug_class.value if isinstance(bug_class, BugClass) else str(bug_class)
+        payload = {
+            "task": "produce a minimal safe repair",
+            "bug_class": bug_value,
+            "incident_id": sig_id,
+            "file": self.target_file.as_posix(),
+            "context": context or {},
+            "source": source[: self.max_prompt_chars],
+            "output_contract": "Return only a single unified diff with --- a/<file> and +++ b/<file> headers. Do not return markdown or explanations.",
+        }
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+    def _default_call(self, prompt: str, provider: str, key: str) -> Any:
+        if provider == "gemini":
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + key
+            body = {"contents": [{"parts": [{"text": prompt}]}]}
+        else:
+            url = "https://api.openai.com/v1/chat/completions"
+            body = {"model": os.getenv("OMNI_LLM_MODEL", "gpt-4o-mini"), "temperature": 0, "messages": [{"role": "user", "content": prompt}]}
+        request = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"}, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (OSError, ValueError, urllib.error.URLError):
+            return None
+
+    def apply_patch(
+        self,
+        bug_class: BugClass | str,
+        sig_id: str,
+        source: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> PatchResult | None:
+        credential = self._credential()
+        if credential is None:
+            return None
+        provider, key = credential
+        original = source if source is not None else self.target_file.read_text(encoding="utf-8")
+        prompt = self.build_prompt(original, bug_class, sig_id, context)
+        try:
+            if self.llm_call is None:
+                response = self._default_call(prompt, provider, key)
+            else:
+                try:
+                    response = self.llm_call(prompt)
+                except TypeError:
+                    response = self.llm_call(prompt, provider, key)
+        except Exception:
+            return None
+        text = _response_text(response)
+        if not text:
+            return None
+        diff = _strip_markdown(text)
+        modified = _apply_unified_diff(original, diff, self.target_file)
+        if modified is None or modified == original:
+            return None
+        try:
+            compile(modified, str(self.target_file), "exec")
+        except (SyntaxError, ValueError, TypeError):
+            return None
+        self.last_modified_source = modified
+        strategy = "llm_fallback"
+        return PatchResult(
+            sig_id=sig_id,
+            strategy=strategy,
+            file_path=str(self.target_file),
+            diff=diff,
+            applied=True,
+            base_file_sha256=hashlib.sha256(original.encode("utf-8")).hexdigest(),
+        )
+
+    patch = apply_patch
+    propose_patch = apply_patch
+    generate_patch = apply_patch
+
+
 class PatchLadder:
     STRATEGIES = {
         BugClass.PANIC: ["input_guard", "try_catch_boundary"],
         BugClass.STARVATION: ["asyncio_lock_nonblocking", "thread_pool_offload"],
         BugClass.UPSTREAM_TIMEOUT: ["explicit_timeout_guard", "circuit_breaker_fallback"],
     }
+    # T3 adds the enum member as part of the resource-exhaustion attack.  The
+    # getattr keeps this module importable while that additive API change is
+    # being rolled out and is harmless once the member exists.
+    _RESOURCE_EXHAUSTION = getattr(BugClass, "RESOURCE_EXHAUSTION", None)
+    if _RESOURCE_EXHAUSTION is not None:
+        STRATEGIES[_RESOURCE_EXHAUSTION] = ["bounded_cache"]
 
     def __init__(self, target_file: Path | str = "target_app/app.py") -> None:
         self.target_file = Path(target_file)
@@ -340,6 +629,12 @@ class PatchLadder:
             module = _ensure_import(module, _json_response_import())
             if strategy_index == 1:
                 module = module.visit(FallbackTransformer())
+        elif self._RESOURCE_EXHAUSTION is not None and bug_class is self._RESOURCE_EXHAUSTION:
+            module = module.visit(BoundedCacheTransformer())
+            module = _ensure_import(
+                module,
+                cst.parse_statement("from collections import OrderedDict\n"),  # type: ignore[return-value]
+            )
         else:
             raise ValueError(f"Unknown bug class: {bug_class}")
         return module.code

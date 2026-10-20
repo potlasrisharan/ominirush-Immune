@@ -66,7 +66,7 @@ class VerifierEngine:
         status_code = int(result.get("status_code", 0))
         statuses: list[int]
         durations: list[float]
-        if dna.attack_type is AttackType.STORM and "stats" in result:
+        if dna.attack_type in {AttackType.STORM, AttackType.LEAK} and "stats" in result:
             after = result["stats"]
             statuses = [
                 int(status)
@@ -87,7 +87,7 @@ class VerifierEngine:
             if dna.attack_type is AttackType.LATENCY and status_code == 504:
                 after = compute_latency_stats(durations, [200])
 
-        if dna.attack_type is AttackType.STORM and "stats" in result:
+        if dna.attack_type in {AttackType.STORM, AttackType.LEAK} and "stats" in result:
             after = LatencyStats.model_validate(result["stats"])
 
         handled_status = status_code in {200, 201, 202, 204, 400, 408, 422, 504}

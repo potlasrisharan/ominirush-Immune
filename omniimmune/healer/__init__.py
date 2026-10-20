@@ -1,6 +1,6 @@
 """Blue Swarm diagnosis and source patching tools."""
 
-from .patcher import PatchLadder
+from .patcher import LLMFallbackPatcher, PatchLadder
 from .triage import TriageEngine
 
-__all__ = ["PatchLadder", "TriageEngine"]
+__all__ = ["LLMFallbackPatcher", "PatchLadder", "TriageEngine"]

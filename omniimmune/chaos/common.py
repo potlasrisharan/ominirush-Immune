@@ -11,6 +11,7 @@ ATTACK_BUG_HINT = {
     AttackType.FUZZ: BugClass.PANIC,
     AttackType.STORM: BugClass.STARVATION,
     AttackType.LATENCY: BugClass.UPSTREAM_TIMEOUT,
+    AttackType.LEAK: BugClass.RESOURCE_EXHAUSTION,
 }
 
 
@@ -74,4 +75,8 @@ async def replay(dna, target_url: str, client=None, **kwargs) -> dict:
         return await StormLoad(seed=dna.seed).execute(target_url, dna, client=client, **kwargs)
     if attack_type is AttackType.LATENCY:
         return await LatencyDriftAgent(seed=dna.seed).execute(target_url, dna, client=client, **kwargs)
+    if attack_type is AttackType.LEAK:
+        from .memory import MemoryStressAgent
+
+        return await MemoryStressAgent(seed=dna.seed).execute(target_url, dna, client=client, **kwargs)
     raise ValueError(f"Unsupported attack type: {attack_type}")

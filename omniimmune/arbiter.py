@@ -17,7 +17,7 @@ from omniimmune.chaos.common import ATTACK_BUG_HINT, compute_latency_stats
 from omniimmune.chaos.runner import RedSwarmRunner
 from omniimmune.events import EventBus, EventType
 from omniimmune.healer.git_branch import GitBranchEngine, GitBranchError
-from omniimmune.healer.patcher import PatchLadder
+from omniimmune.healer.patcher import LLMFallbackPatcher, PatchLadder
 from omniimmune.healer.triage import TriageEngine
 from omniimmune.memory import ImmuneMemory, UntrustedImmuneMemoryError
 from omniimmune.models import (
@@ -51,6 +51,7 @@ class Arbiter:
         fresh: bool = False,
         no_ui: bool = False,
         push_pr: bool = False,
+        llm_patcher: LLMFallbackPatcher | None = None,
     ) -> None:
         if mode not in {"docker", "local"}:
             raise ValueError("mode must be docker or local")
@@ -71,6 +72,10 @@ class Arbiter:
         self._owns_services = False
         self._patch_diffs: list[str] = []
         self._incidents: list[dict] = []
+        # Injectable for offline tests and deployments that provide their own
+        # provider transport.  The fallback itself remains a no-op without a
+        # supported environment key.
+        self.llm_patcher = llm_patcher or LLMFallbackPatcher(self.target_file)
 
     async def _is_ready(self, url: str) -> bool:
         try:
@@ -220,6 +225,16 @@ class Arbiter:
             stats = result.get("stats")
             p99 = float(stats.p99_ms if hasattr(stats, "p99_ms") else result.get("elapsed_ms", 0))
             return triage.diagnose_from_sla_breach(dna.target_endpoint, p99, dna_id=dna.dna_id)
+        if vector is AttackType.LEAK:
+            stats = result.get("stats")
+            peak_mem_mb = float(
+                stats.peak_mem_mb if hasattr(stats, "peak_mem_mb") else result.get("peak_mem_mb", 0.0)
+            )
+            return triage.diagnose_from_resource_exhaustion(
+                dna.target_endpoint,
+                peak_mem_mb,
+                dna_id=dna.dna_id,
+            )
         return triage.diagnose_from_timeout(dna.target_endpoint, dna_id=dna.dna_id)
 
     @staticmethod
@@ -334,8 +349,41 @@ class Arbiter:
             if verdict.passed:
                 return patch, verdict
             await self.event_bus.publish(EventType.ROLLED_BACK, {"sig_id": signature.sig_id, "strategy": patch.strategy})
+
+        # Deterministic repairs are always preferred.  An optional LLM is a
+        # final, strictly validated candidate only; it never receives a chance
+        # to alter the target until its in-memory diff has compiled.
         ladder.rollback(pristine)
         await self._restart_target()
+        try:
+            llm_patch = self.llm_patcher.apply_patch(
+                signature.bug_class,
+                signature.sig_id,
+                source=pristine,
+                context=signature.model_dump(mode="json"),
+            )
+        except TypeError:
+            # Keep compatibility with small injected test doubles implementing
+            # the older two-argument callable contract.
+            llm_patch = self.llm_patcher.apply_patch(signature.bug_class, signature.sig_id, pristine)
+        if llm_patch is not None and llm_patch.applied:
+            candidate = getattr(self.llm_patcher, "last_modified_source", None)
+            if candidate is None:
+                candidate = self.target_file.read_text(encoding="utf-8")
+            if candidate != pristine:
+                self.target_file.write_text(candidate, encoding="utf-8")
+                self._patch_diffs.append(llm_patch.diff)
+                await event_publish(self.event_bus, EventType.PATCH_APPLIED, llm_patch.model_dump(mode="json"))
+                await self._restart_target()
+                verdict = await verify_candidate(llm_patch)
+                if verdict.passed:
+                    return llm_patch, verdict
+                await self.event_bus.publish(
+                    EventType.ROLLED_BACK,
+                    {"sig_id": signature.sig_id, "strategy": llm_patch.strategy},
+                )
+                ladder.rollback(pristine)
+                await self._restart_target()
         raise RuntimeError(f"No patch strategy verified for {signature.sig_id}")
 
     def _escalation_details(self, sig_id: str) -> list[dict]:

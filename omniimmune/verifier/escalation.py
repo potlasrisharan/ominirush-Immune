@@ -128,6 +128,29 @@ class EscalationEngine:
                 for concurrency, request_count in workloads
             ]
 
+        if original_dna.attack_type is AttackType.LEAK or endpoint == "/api/v1/cache":
+            base_count = max(1, min(original_dna.request_count, self.MAX_REQUEST_COUNT))
+            base_size = str(original_dna.query_params.get("payload_size", "1024"))
+            candidates = [
+                max(1, base_count - 1),
+                min(self.MAX_REQUEST_COUNT, base_count + 1),
+                min(self.MAX_REQUEST_COUNT, base_count + 2),
+            ]
+            counts: list[int] = []
+            for count in candidates:
+                if count not in counts:
+                    counts.append(count)
+                if len(counts) == 3:
+                    break
+            return [
+                self._build(
+                    original_dna,
+                    request_count=count,
+                    query_params={**original_dna.query_params, "payload_size": base_size},
+                )
+                for count in counts
+            ]
+
         # Query-driven endpoints must be changed through relevant query
         # parameters.  Keep delay values finite so a mutation cannot create an
         # unbounded external workload.

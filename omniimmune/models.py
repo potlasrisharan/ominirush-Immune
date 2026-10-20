@@ -13,12 +13,14 @@ class AttackType(str, Enum):
     FUZZ = "fuzz"
     STORM = "storm"
     LATENCY = "latency"
+    LEAK = "leak"
 
 
 class BugClass(str, Enum):
     PANIC = "panic"
     STARVATION = "starvation"
     UPSTREAM_TIMEOUT = "upstream_timeout"
+    RESOURCE_EXHAUSTION = "resource_exhaustion"
 
 
 class AttackDNA(BaseModel):

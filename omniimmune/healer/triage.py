@@ -190,3 +190,53 @@ class TriageEngine:
             telemetry=self._telemetry(telemetry),
             dna_id=dna_id,
         )
+
+    def diagnose_from_resource_exhaustion(
+        self,
+        endpoint: str,
+        peak_mem_mb: float = 0.0,
+        dna_id: str = "",
+        telemetry: list[TelemetrySample] | None = None,
+    ) -> IncidentSignature:
+        """Identify an endpoint retaining request data in an unbounded cache."""
+        source = self.target_file.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(self.target_file))
+        culprit_function: str | None = None
+        culprit_line: int | None = None
+        for function in ast.walk(tree):
+            if not isinstance(function, ast.AsyncFunctionDef):
+                continue
+            has_cache_write = any(
+                isinstance(node, ast.Assign)
+                and any(
+                    isinstance(target, ast.Subscript)
+                    and isinstance(target.value, ast.Name)
+                    and "cache" in target.value.id.lower()
+                    for target in node.targets
+                )
+                for node in ast.walk(function)
+            )
+            if has_cache_write:
+                culprit_function = function.name
+                culprit_line = function.lineno
+                break
+
+        return IncidentSignature(
+            sig_id=IncidentSignature.make_sig_id(BugClass.RESOURCE_EXHAUSTION, endpoint, None),
+            bug_class=BugClass.RESOURCE_EXHAUSTION,
+            failure_kind="resource_exhaustion",
+            endpoint=endpoint,
+            exception_type="MemoryError",
+            message_token="cache_growth",
+            culprit_file=self._relative_path(self.target_file),
+            culprit_function=culprit_function,
+            culprit_line=culprit_line,
+            stack_trace=f"Unbounded cache growth detected: peak retained memory {peak_mem_mb:.3f}MB",
+            telemetry=self._telemetry(telemetry),
+            dna_id=dna_id,
+        )
+
+    # Additive aliases make the diagnosis convenient for callers that name the
+    # observed condition rather than the bug class.
+    diagnose_from_memory_exhaustion = diagnose_from_resource_exhaustion
+    diagnose_from_leak = diagnose_from_resource_exhaustion
