@@ -44,9 +44,9 @@ services:
     container_name: omniimmune-arbiter
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./target_app:/app/target_app
       - .:/app/workspace
-    working_dir: /app
+      - ./target_app:/app/workspace/target_app
+    working_dir: /app/workspace
     environment:
       OMNI_SEED: "1337"
       OMNI_MODE: docker
