@@ -42,6 +42,9 @@ htmlcov/
 # Runtime data & temp files
 .omni_memory/
 artifacts/
+.env
+.env.*
+!.env.example
 *.log
 INCIDENT_REPORT.md
 .opencode/
