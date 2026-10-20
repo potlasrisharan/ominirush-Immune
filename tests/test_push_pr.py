@@ -40,7 +40,9 @@ def test_push_and_create_pr_returns_receipt_without_network_or_shell_interpolati
     def fake_run(args: list[str], **kwargs):
         if args[:3] == ["gh", "pr", "create"]:
             calls.append(args)
-            return subprocess.CompletedProcess(args, 0, json.dumps({"url": "https://github.com/example/repo/pull/7"}), "")
+            return subprocess.CompletedProcess(
+                args, 0, json.dumps({"url": "https://github.com/example/repo/pull/7"}), ""
+            )
         return original_run(args, **kwargs)
 
     monkeypatch.setattr(engine, "_run", fake_run)
@@ -68,7 +70,5 @@ def test_push_and_create_pr_returns_receipt_without_network_or_shell_interpolati
             "Auto-heal demo; keep quotes intact",
             "--body-file",
             str(body),
-            "--json",
-            "url",
         ]
     ]
