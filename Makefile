@@ -1,4 +1,4 @@
-.PHONY: test demo docker-demo dashboard clean
+.PHONY: test demo docker-demo dashboard video clean
 
 test:
 	.venv/bin/python -m pytest -v tests/
@@ -11,6 +11,9 @@ docker-demo:
 
 dashboard:
 	.venv/bin/python main.py --serve-dashboard 8080
+
+video:
+	.venv/bin/python scripts/generate_demo_video.py
 
 clean:
 	rm -rf artifacts/ __pycache__ .pytest_cache
