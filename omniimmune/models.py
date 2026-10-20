@@ -4,7 +4,7 @@ import hashlib
 import json
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, ClassVar, Iterable
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -140,6 +140,7 @@ class VerificationVerdict(BaseModel):
 
 
 class ImmunitySummary(BaseModel):
+    ENGINE_VERSION: ClassVar[str] = "1.0.0"
     score: int
     incidents_total: int
     incidents_verified: int
@@ -171,6 +172,10 @@ class ImmunitySummary(BaseModel):
         """Return a concise status badge for reports and dashboards."""
         status = "VACCINATED" if self.score >= 100 else "AT RISK"
         return f"[{status} {self.score}/100]"
+
+    def is_fully_vaccinated(self) -> bool:
+        """Return whether the immunity score is exactly complete."""
+        return self.score == 100
 
     @classmethod
     def compute(

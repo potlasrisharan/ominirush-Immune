@@ -108,6 +108,19 @@ def test_immunity_summary_returns_status_badge() -> None:
     assert at_risk.summary_badge() == "[AT RISK 80/100]"
 
 
+def test_immunity_summary_engine_version_and_full_vaccination() -> None:
+    vaccinated = ImmunitySummary.compute(
+        incidents_total=1,
+        incidents_verified=1,
+        regression_passed=True,
+        mean_survival_rate=1.0,
+    )
+
+    assert ImmunitySummary.ENGINE_VERSION == "1.0.0"
+    assert vaccinated.is_fully_vaccinated()
+    assert vaccinated.model_copy(update={"score": 99}).is_fully_vaccinated() is False
+
+
 @pytest.mark.asyncio
 async def test_event_bus_order_wildcard_history_and_isolation(caplog) -> None:
     bus = EventBus()
