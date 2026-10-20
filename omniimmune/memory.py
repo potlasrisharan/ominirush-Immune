@@ -36,7 +36,11 @@ class ImmuneMemory:
     @classmethod
     def _signing_key(cls) -> bytes:
         configured = os.getenv("OMNI_SIGNING_KEY")
-        return configured.encode("utf-8") if configured else cls._DEVELOPMENT_SIGNING_KEY
+        if not configured:
+            return cls._DEVELOPMENT_SIGNING_KEY
+        # Normalize operator-provided secrets to a full HMAC key so short
+        # environment values do not silently weaken the signing boundary.
+        return hashlib.sha256(configured.encode("utf-8")).digest()
 
     @classmethod
     def _canonical_message(
@@ -44,7 +48,7 @@ class ImmuneMemory:
     ) -> bytes:
         # Keep the signed message exactly aligned with the memory contract:
         # sig_id + strategy + base-file digest + modified source.
-        return f"{sig_id}{strategy}{base_file_sha256}{modified_source}".encode("utf-8")
+        return "\x00".join((sig_id, strategy, base_file_sha256, modified_source)).encode("utf-8")
 
     @classmethod
     def _sign(

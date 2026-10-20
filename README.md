@@ -44,8 +44,11 @@ chaos loop, run the standalone dashboard server (default port `8080`) and open
 .venv/bin/python main.py --serve-dashboard 9090
 ```
 
-The run writes `INCIDENT_REPORT.md`, DNA under `artifacts/dna/`, patch files
-under `artifacts/patches/`, and cached signatures under `artifacts/memory/`.
+The run writes `INCIDENT_REPORT.md`, the standalone dashboard at
+`artifacts/report.html`, Prometheus gauges at `artifacts/metrics.prom`, DNA
+under `artifacts/dna/`, patch files under `artifacts/patches/`, and cached
+signatures under `artifacts/memory/`. Report culprit locations and unified diff
+headers are repository-relative so host checkout paths are never emitted.
 Runtime artifacts are ignored by git.
 
 Immune-memory entries are HMAC-SHA256 signed over their signature ID, patch

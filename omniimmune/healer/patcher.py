@@ -306,6 +306,13 @@ class PatchLadder:
     def __init__(self, target_file: Path | str = "target_app/app.py") -> None:
         self.target_file = Path(target_file)
 
+    def _relative_target(self) -> str:
+        root = Path(__file__).resolve().parents[2]
+        try:
+            return self.target_file.resolve().relative_to(root).as_posix()
+        except ValueError:
+            return self.target_file.name
+
     def _transform(self, bug_class: BugClass, strategy_index: int, source: str) -> str:
         module = cst.parse_module(source)
         if bug_class is BugClass.PANIC:
@@ -341,8 +348,8 @@ class PatchLadder:
             difflib.unified_diff(
                 original.splitlines(keepends=True),
                 modified.splitlines(keepends=True),
-                fromfile=f"a/{self.target_file}",
-                tofile=f"b/{self.target_file}",
+                fromfile=f"a/{self._relative_target()}",
+                tofile=f"b/{self._relative_target()}",
             )
         )
         self.target_file.write_text(modified, encoding="utf-8")

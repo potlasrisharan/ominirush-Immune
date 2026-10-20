@@ -43,7 +43,7 @@ ValueError: CRITICAL_ORDER_PANIC: Negative quantity
     )
     assert signature.bug_class is BugClass.PANIC
     assert signature.exception_type == "ValueError"
-    assert signature.culprit_file == "/workspace/target_app/app.py"
+    assert signature.culprit_file == "target_app/app.py"
     assert signature.culprit_line == 38
     assert signature.culprit_function == "create_order"
     assert signature.dna_id == "dna-123"

@@ -30,7 +30,7 @@ from omniimmune.models import (
     PatchResult,
     VerificationVerdict,
 )
-from omniimmune.report import ReportGenerator, generate_html, generate_pr_template
+from omniimmune.report import ReportGenerator, generate_html, generate_pr_template, generate_prometheus_metrics
 from omniimmune.ui.hud import OmniHUD
 from omniimmune.verifier.verifier import VerifierEngine
 from omniimmune.verifier.escalation import EscalationEngine
@@ -509,6 +509,10 @@ class Arbiter:
                         "pr_template_paths": pr_template_paths,
                     }
                 )
+                metrics_path = Path(
+                    os.getenv("OMNI_METRICS_PATH", str(self.root / "artifacts" / "metrics.prom"))
+                )
+                generate_prometheus_metrics(summary, metrics_path)
                 self._write_dashboard_state(summary)
                 await self.event_bus.publish(EventType.RUN_COMPLETE, summary.model_dump(mode="json"))
                 if hud:

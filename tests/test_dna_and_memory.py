@@ -15,7 +15,7 @@ from omniimmune.models import (
     IncidentSignature,
     ImmunitySummary,
 )
-from omniimmune.report import generate_html, generate_pr_template
+from omniimmune.report import generate_html, generate_pr_template, generate_prometheus_metrics
 
 
 def test_attack_dna_defaults_and_hash_exclude_metadata() -> None:
@@ -215,6 +215,26 @@ def test_immune_memory_rejects_tampered_base_sha256(tmp_path) -> None:
         memory.get_patch(sig_id)
 
 
+def test_immune_memory_rejects_tampered_signature(tmp_path) -> None:
+    memory = ImmuneMemory(tmp_path / "memory")
+    sig_id = "sig-signature-tampered"
+    memory.save_patch(
+        sig_id,
+        {
+            "strategy": "input_guard",
+            "base_file_sha256": hashlib.sha256(b"original").hexdigest(),
+            "modified_source": "hardened",
+        },
+    )
+    path = memory.root / f"{sig_id}.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["signature"] = "0" * 64
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    with pytest.raises(UntrustedImmuneMemoryError):
+        memory.get_patch(sig_id)
+
+
 def test_immune_memory_rejects_unsafe_signature_ids(tmp_path) -> None:
     memory = ImmuneMemory(tmp_path)
     for unsafe in ("../escape", "a/b", "", ".", "space here"):
@@ -255,6 +275,42 @@ def test_postmortem_dashboard_is_standalone_and_contains_incident_cards(tmp_path
     assert "target_app/app.py:37" in html
     assert "420.0 ms" in html and "12.0 ms" in html
     assert "<details>" in html and "gh pr create" in html
+
+
+def test_reports_sanitize_absolute_culprits_and_diff_headers(tmp_path) -> None:
+    summary = ImmunitySummary.compute(incidents_total=1, incidents_verified=1).model_copy(
+        update={
+            "incidents": [
+                {
+                    "sig_id": "sig-paths",
+                    "culprit": "/Users/example/repo/target_app/app.py:37",
+                    "diff": "--- a//Users/example/repo/target_app/app.py\n+++ b//Users/example/repo/target_app/app.py\n@@ -1 +1 @@\n",
+                    "verdict": "PASS",
+                }
+            ]
+        }
+    )
+    html = generate_html(summary, tmp_path / "report.html")
+    assert "target_app/app.py:37" in html
+    assert "/Users/example" not in html
+    assert "--- a/target_app/app.py" in html
+    assert "+++ b/target_app/app.py" in html
+
+
+def test_prometheus_metrics_export(tmp_path) -> None:
+    summary = ImmunitySummary.compute(
+        incidents_total=3,
+        incidents_verified=2,
+        regression_passed=True,
+        mean_survival_rate=0.75,
+    )
+    path = tmp_path / "artifacts" / "metrics.prom"
+    content = generate_prometheus_metrics(summary, path)
+    assert path.read_text(encoding="utf-8") == content
+    assert "# TYPE omniimmune_score gauge\nomniimmune_score 75" in content
+    assert "omniimmune_incidents_verified 2" in content
+    assert "omniimmune_incidents_total 3" in content
+    assert "omniimmune_mean_survival_rate 0.75" in content
 
 
 def test_pr_template_contains_culprit_metrics_diff_proof_and_checklist(tmp_path) -> None:

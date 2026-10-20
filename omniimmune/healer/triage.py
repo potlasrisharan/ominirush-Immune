@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
 from pathlib import Path
 
@@ -18,6 +19,29 @@ _EXCEPTION = re.compile(
 class TriageEngine:
     def __init__(self, target_file: Path | str = "target_app/app.py") -> None:
         self.target_file = Path(target_file)
+
+    def _relative_path(self, value: Path | str) -> str:
+        """Return a repository-relative path without leaking host paths."""
+        root = Path(__file__).resolve().parents[2]
+        path = Path(value)
+        relative_target = self.target_file
+        if relative_target.is_absolute():
+            try:
+                relative_target = relative_target.resolve().relative_to(root)
+            except ValueError:
+                relative_target = Path(relative_target.name)
+
+        if path.is_absolute():
+            try:
+                return path.resolve().relative_to(root).as_posix()
+            except ValueError:
+                # Tracebacks from a target process can use a different checkout
+                # prefix. Preserve the repository suffix when it is identifiable.
+                target_parts = relative_target.parts
+                if len(path.parts) >= len(target_parts) and path.parts[-len(target_parts):] == target_parts:
+                    return Path(*target_parts).as_posix()
+                return os.path.relpath(path, root).replace(os.sep, "/")
+        return path.as_posix()
 
     @staticmethod
     def _telemetry(telemetry: list[TelemetrySample] | None) -> list[TelemetrySample]:
@@ -41,14 +65,14 @@ class TriageEngine:
                 message_token = message.split()[0] if message else None
                 break
 
-        culprit_file = str(self.target_file)
+        culprit_file = self._relative_path(self.target_file)
         culprit_line: int | None = None
         culprit_function: str | None = None
         # The last traceback frame is the point where the exception escaped.
         frames = list(_TRACEBACK_FRAME.finditer(stderr_logs))
         if frames:
             frame = frames[-1]
-            culprit_file = frame.group("file")
+            culprit_file = self._relative_path(frame.group("file"))
             culprit_line = int(frame.group("line"))
             culprit_function = frame.group("function")
 
@@ -109,7 +133,7 @@ class TriageEngine:
             bug_class=BugClass.STARVATION,
             failure_kind="sla_breach",
             endpoint=endpoint,
-            culprit_file=str(self.target_file),
+            culprit_file=self._relative_path(self.target_file),
             culprit_function=culprit_function,
             culprit_line=culprit_line,
             stack_trace=f"SLA breach: p99 latency was {p99_ms:.1f}ms",
@@ -155,7 +179,7 @@ class TriageEngine:
             failure_kind="hang",
             endpoint=endpoint,
             exception_type="TimeoutException",
-            culprit_file=str(self.target_file),
+            culprit_file=self._relative_path(self.target_file),
             culprit_function=culprit_function,
             culprit_line=culprit_line,
             stack_trace="Uncapped upstream timeout detected: httpx client initialized without timeout bounds",
