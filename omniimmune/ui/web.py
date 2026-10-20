@@ -180,7 +180,8 @@ class DashboardBroadcaster:
         self.event_bus = event_bus or EventBus()
         self.store = store or DashboardStore()
         self.keepalive_seconds = max(0.1, float(keepalive_seconds))
-        self._clients: dict[asyncio.Queue[dict[str, Any]], asyncio.AbstractEventLoop] = {}
+        self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
+        self._subscriber_loops: dict[asyncio.Queue[dict[str, Any]], asyncio.AbstractEventLoop] = {}
         self._lock = RLock()
         self.event_bus.subscribe_all(self._on_event)
 
@@ -190,21 +191,29 @@ class DashboardBroadcaster:
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         with self._lock:
-            self._clients[queue] = loop
+            self._subscribers.add(queue)
+            self._subscriber_loops[queue] = loop
         return queue
 
     def unsubscribe(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
         """Disconnect a client queue (safe to call more than once)."""
 
         with self._lock:
-            self._clients.pop(queue, None)
+            self._subscribers.discard(queue)
+            self._subscriber_loops.pop(queue, None)
 
     def close(self) -> None:
         """Detach from the EventBus when an embedding app is torn down."""
 
         self.event_bus.unsubscribe_all(self._on_event)
         with self._lock:
-            self._clients.clear()
+            self._subscribers.clear()
+            self._subscriber_loops.clear()
+
+    async def broadcast(self, event_type: str, data: dict[str, Any]) -> None:
+        """Broadcast one event directly, without requiring an EventBus publish."""
+
+        self._on_event(Event(type=event_type, data=data))
 
     def _dashboard_patch(self, event: Event) -> dict[str, Any]:
         """Translate lifecycle events into a compatible dashboard snapshot."""
@@ -259,7 +268,7 @@ class DashboardBroadcaster:
             "state": state,
         }
         with self._lock:
-            client_items = tuple(self._clients.items())
+            client_items = tuple(self._subscriber_loops.items())
         for queue, loop in client_items:
             try:
                 if loop.is_closed():
