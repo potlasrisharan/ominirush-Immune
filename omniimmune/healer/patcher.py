@@ -320,9 +320,10 @@ class BoundedCacheTransformer(cst.CSTTransformer):
     the common ``cache = {}; cache[key] = value`` resource exhaustion bug.
     """
 
-    def __init__(self, max_entries: int = 128) -> None:
+    def __init__(self, max_entries: int = 1000) -> None:
         self.max_entries = max_entries
         self.cache_names: set[str] = set()
+        self.deque_names: set[str] = set()
 
     @staticmethod
     def _cache_name(target: cst.BaseExpression) -> str | None:
@@ -342,6 +343,14 @@ class BoundedCacheTransformer(cst.CSTTransformer):
             return updated_node.with_changes(
                 value=cst.Call(func=_name("OrderedDict"), args=[])
             )
+        if isinstance(original_node.value, cst.List):
+            self.deque_names.add(name)
+            return updated_node.with_changes(
+                value=cst.Call(
+                    func=_name("deque"),
+                    args=[cst.Arg(keyword=cst.Name("maxlen"), value=cst.Integer(str(self.max_entries)))],
+                )
+            )
         return updated_node
 
     def leave_AnnAssign(
@@ -349,7 +358,15 @@ class BoundedCacheTransformer(cst.CSTTransformer):
     ) -> cst.AnnAssign:
         name = self._cache_name(original_node.target)
         if name is None or not isinstance(original_node.value, cst.Dict):
-            return updated_node
+            if name is None or not isinstance(original_node.value, cst.List):
+                return updated_node
+            self.deque_names.add(name)
+            return updated_node.with_changes(
+                value=cst.Call(
+                    func=_name("deque"),
+                    args=[cst.Arg(keyword=cst.Name("maxlen"), value=cst.Integer(str(self.max_entries)))],
+                )
+            )
         self.cache_names.add(name)
         return updated_node.with_changes(value=cst.Call(func=_name("OrderedDict"), args=[]))
 
@@ -506,6 +523,14 @@ class LLMFallbackPatcher:
                 return provider, key
         return None
 
+    @classmethod
+    def is_available(cls) -> bool:
+        """Return whether an explicitly configured provider credential exists."""
+        return any(
+            os.getenv(variable, "").strip()
+            for variable in ("OMNI_LLM_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY")
+        )
+
     def build_prompt(
         self,
         source: str,
@@ -539,19 +564,40 @@ class LLMFallbackPatcher:
         except (OSError, ValueError, urllib.error.URLError):
             return None
 
-    def apply_patch(
+    def synthesize_patch(
         self,
-        bug_class: BugClass | str,
-        sig_id: str,
-        source: str | None = None,
-        context: dict[str, Any] | None = None,
-    ) -> PatchResult | None:
+        source_code: str,
+        culprit_file: str,
+        culprit_line: int,
+        traceback_str: str,
+        dna_payload: Any,
+    ) -> str | None:
+        """Ask the configured model for one validated unified diff.
+
+        The returned value is the diff text.  The successfully applied source is
+        retained in ``last_modified_source`` for the Arbiter's existing
+        ``PatchResult`` flow.  No provider is contacted without an explicit
+        supported API key.
+        """
         credential = self._credential()
         if credential is None:
             return None
         provider, key = credential
-        original = source if source is not None else self.target_file.read_text(encoding="utf-8")
-        prompt = self.build_prompt(original, bug_class, sig_id, context)
+        culprit = str(culprit_file)
+        source_slice = source_code[: self.max_prompt_chars]
+        prompt = json.dumps(
+            {
+                "system": "Output ONLY a valid unified diff starting with '--- a/' and '+++ b/' that resolves the vulnerability without breaking functionality.",
+                "culprit_file": culprit,
+                "culprit_line": int(culprit_line),
+                "source_slice": source_slice,
+                "traceback": str(traceback_str),
+                "triggering_input": dna_payload,
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+        )
         try:
             if self.llm_call is None:
                 response = self._default_call(prompt, provider, key)
@@ -566,13 +612,39 @@ class LLMFallbackPatcher:
         if not text:
             return None
         diff = _strip_markdown(text)
-        modified = _apply_unified_diff(original, diff, self.target_file)
-        if modified is None or modified == original:
+        modified = _apply_unified_diff(source_code, diff, self.target_file)
+        if modified is None or modified == source_code:
             return None
         try:
             compile(modified, str(self.target_file), "exec")
         except (SyntaxError, ValueError, TypeError):
             return None
+        self.last_modified_source = modified
+        return diff
+
+    def apply_patch(
+        self,
+        bug_class: BugClass | str,
+        sig_id: str,
+        source: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> PatchResult | None:
+        credential = self._credential()
+        if credential is None:
+            return None
+        provider, key = credential
+        original = source if source is not None else self.target_file.read_text(encoding="utf-8")
+        context = context or {}
+        diff = self.synthesize_patch(
+            original,
+            str(context.get("culprit_file") or self.target_file),
+            int(context.get("culprit_line") or 1),
+            str(context.get("stack_trace") or ""),
+            context.get("dna_payload", context),
+        )
+        if diff is None or self.last_modified_source is None:
+            return None
+        modified = self.last_modified_source
         self.last_modified_source = modified
         strategy = "llm_fallback"
         return PatchResult(
@@ -630,11 +702,18 @@ class PatchLadder:
             if strategy_index == 1:
                 module = module.visit(FallbackTransformer())
         elif self._RESOURCE_EXHAUSTION is not None and bug_class is self._RESOURCE_EXHAUSTION:
-            module = module.visit(BoundedCacheTransformer())
-            module = _ensure_import(
-                module,
-                cst.parse_statement("from collections import OrderedDict\n"),  # type: ignore[return-value]
-            )
+            transformer = BoundedCacheTransformer()
+            module = module.visit(transformer)
+            if transformer.cache_names:
+                module = _ensure_import(
+                    module,
+                    cst.parse_statement("from collections import OrderedDict\n"),  # type: ignore[return-value]
+                )
+            if transformer.deque_names:
+                module = _ensure_import(
+                    module,
+                    cst.parse_statement("from collections import deque\n"),  # type: ignore[return-value]
+                )
         else:
             raise ValueError(f"Unknown bug class: {bug_class}")
         return module.code

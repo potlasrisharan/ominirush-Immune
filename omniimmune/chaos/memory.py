@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from collections import Counter
+from pathlib import Path
+
+import psutil
 
 import httpx
 
@@ -40,6 +44,26 @@ class MemoryStressAgent:
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ValueError(f"{name} must be a positive integer")
 
+    @staticmethod
+    def _rss_mb() -> float:
+        try:
+            return psutil.Process(os.getpid()).memory_info().rss / 1_000_000
+        except (OSError, AttributeError):
+            return 0.0
+
+    @staticmethod
+    def _memory_limit_mb() -> float | None:
+        for filename in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+            try:
+                value = Path(filename).read_text(encoding="utf-8").strip()
+                if value and value != "max":
+                    limit = int(value) / 1_000_000
+                    if limit > 0:
+                        return limit
+            except (OSError, ValueError):
+                continue
+        return None
+
     def build_dna(
         self,
         request_count: int | None = None,
@@ -51,9 +75,10 @@ class MemoryStressAgent:
         self._validate_positive(size, "payload_size")
         return AttackDNA(
             attack_type=AttackType.LEAK,
-            target_endpoint="/api/v1/cache",
-            http_method="GET",
-            query_params={"payload_size": str(size)},
+            target_endpoint="/api/v1/cache/item",
+            http_method="POST",
+            payload={"data": "x" * size},
+            headers={"Content-Type": "application/json"},
             concurrency=self.concurrency,
             request_count=count,
             seed=self.seed,
@@ -71,11 +96,13 @@ class MemoryStressAgent:
         owned_client = client is None
         active_client = client if client is not None else httpx.AsyncClient()
         started = time.perf_counter()
+        rss_before_mb = self._rss_mb()
+        rss_samples: list[float] = [rss_before_mb]
+        memory_limit_mb = self._memory_limit_mb()
         try:
-            try:
-                payload_size = max(1, int(dna.query_params.get("payload_size", "1024")))
-            except (TypeError, ValueError):
-                payload_size = 1024
+            payload_size = 1024
+            if isinstance(dna.payload, dict) and isinstance(dna.payload.get("data"), str):
+                payload_size = max(1, len(dna.payload["data"]))
             semaphore = asyncio.Semaphore(dna.concurrency)
             request_results: list[tuple[int, float, str, int | None]] = []
 
@@ -85,6 +112,9 @@ class MemoryStressAgent:
                     key = f"stress-{dna.seed}-{index}"
                     params = dict(dna.query_params)
                     params["key"] = key
+                    request_payload = dict(dna.payload) if isinstance(dna.payload, dict) else dna.payload
+                    if isinstance(request_payload, dict):
+                        request_payload["key"] = key
                     try:
                         response = await asyncio.wait_for(
                             active_client.request(
@@ -92,14 +122,17 @@ class MemoryStressAgent:
                                 f"{target_url.rstrip('/')}{dna.target_endpoint}",
                                 headers=dna.headers,
                                 params=params,
+                                json=request_payload,
                             ),
                             timeout=request_timeout,
                         )
                         body = response_body(response)
+                        rss_samples.append(self._rss_mb())
                         cache_count: int | None = None
                         try:
                             payload = response.json()
-                            cache_count = int(payload.get("cache_size"))
+                            count = payload.get("count", payload.get("cache_size"))
+                            cache_count = int(count)
                         except (AttributeError, TypeError, ValueError):
                             pass
                         return (
@@ -127,23 +160,31 @@ class MemoryStressAgent:
         final_count = counts[-1] if counts else initial_count
         successful = sum(status < 500 and status != 0 for status in statuses)
         grew_for_every_request = bool(counts) and final_count - initial_count >= successful
+        rss_peak_mb = max(rss_samples or [0.0])
+        estimated_peak_mb = (final_count * payload_size) / 1_000_000
+        peak_mem_mb = max(estimated_peak_mb, rss_peak_mb)
+        memory_limit_exceeded = bool(
+            memory_limit_mb is not None and peak_mem_mb >= memory_limit_mb * 0.9
+        )
         stats = compute_latency_stats(
             durations,
             statuses,
-            peak_mem_mb=(final_count * payload_size) / 1_000_000,
+            peak_mem_mb=peak_mem_mb,
         )
         status_counts = Counter(statuses)
         status_code = status_counts.most_common(1)[0][0] if status_counts else 0
-        is_failure = grew_for_every_request or stats.error_rate > 0.05
+        is_failure = grew_for_every_request or stats.error_rate > 0.05 or memory_limit_exceeded
         return {
             "status_code": status_code,
             "response_body": next((result[2] for result in request_results if result[2]), "")[:2000],
             "elapsed_ms": stats.p99_ms or ((time.perf_counter() - started) * 1000),
             "is_failure": is_failure,
-            "failure_kind": "resource_exhaustion" if grew_for_every_request else "exception" if stats.error_rate > 0.05 else None,
+            "failure_kind": "resource_exhaustion" if grew_for_every_request or memory_limit_exceeded else "exception" if stats.error_rate > 0.05 else None,
             "error": (
                 f"cache grew by {final_count - initial_count} entries"
                 if grew_for_every_request
+                else f"RSS approached memory limit ({rss_peak_mb:.1f}MB/{memory_limit_mb:.1f}MB)"
+                if memory_limit_exceeded and memory_limit_mb is not None
                 else f"error rate {stats.error_rate:.1%} exceeded 5%"
                 if stats.error_rate > 0.05
                 else None
@@ -153,6 +194,10 @@ class MemoryStressAgent:
             "initial_cache_size": initial_count,
             "final_cache_size": final_count,
             "cache_growth": final_count - initial_count,
+            "rss_before_mb": rss_before_mb,
+            "rss_peak_mb": rss_peak_mb,
+            "memory_limit_mb": memory_limit_mb,
+            "memory_limit_exceeded": memory_limit_exceeded,
         }
 
     async def run(

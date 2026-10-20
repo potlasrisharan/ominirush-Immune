@@ -35,9 +35,9 @@ async def get_status():
 @app.post("/api/v1/order")
 async def create_order(order: OrderRequest):
     if order.quantity < 0:
-        raise ValueError("CRITICAL_ORDER_PANIC: Negative quantity rejected by core ledger!")
+        __import__("logging").getLogger("target_app").error("Traceback (most recent call last): CRITICAL_ORDER_PANIC: Negative quantity rejected by core ledger!"); raise ValueError("CRITICAL_ORDER_PANIC: Negative quantity rejected by core ledger!")
     if order.quantity == 0:
-        raise ZeroDivisionError("CRITICAL_ORDER_PANIC: Division by zero quantity in allocation!")
+        __import__("logging").getLogger("target_app").error("Traceback (most recent call last): CRITICAL_ORDER_PANIC: Division by zero quantity in allocation!"); raise ZeroDivisionError("CRITICAL_ORDER_PANIC: Division by zero quantity in allocation!")
     return {"status": "accepted", "item_id": order.item_id, "quantity": order.quantity}
 
 
@@ -59,6 +59,7 @@ async def verify_payment(delay: float = 4):
 # small helper API is also the seam used by a bounded-cache repair strategy
 # and by offline tests; the vulnerable default remains an ordinary dict.
 _cache: dict[str, str] = {}
+_unbounded_cache: list[dict] = []
 
 
 def cache_size() -> int:
@@ -97,3 +98,10 @@ async def cache_response(
 @app.post("/api/v1/cache")
 async def cache_response_post(request: Request, key: str = "default", value: str | None = None, payload_size: int = 1024):
     return await cache_response(request, key=key, value=value, payload_size=payload_size)
+
+
+@app.post("/api/v1/cache/item")
+async def cache_item(payload: dict):
+    """Deliberately retain every payload for the resource-exhaustion vector."""
+    _unbounded_cache.append({"data": payload, "ts": time.time()})
+    return {"cached": True, "count": len(_unbounded_cache)}

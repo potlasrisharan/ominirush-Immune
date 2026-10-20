@@ -7,8 +7,9 @@ from omniimmune.events import EventBus, EventType
 from omniimmune.models import AttackDNA, AttackType
 
 from .common import ATTACK_BUG_HINT
-from .fuzzer import FuzzNet
+from .fuzzer import FuzzNet, discover_endpoints
 from .latency import LatencyDriftAgent
+from .memory import MemoryStressAgent
 from .storm import StormLoad
 
 
@@ -41,6 +42,7 @@ class RedSwarmRunner:
             AttackType.FUZZ: "/api/v1/order",
             AttackType.STORM: "/api/v1/inventory/reserve",
             AttackType.LATENCY: "/api/v1/payment/verify",
+            AttackType.LEAK: "/api/v1/cache",
         }[attack_type]
 
     async def run_vector(
@@ -54,7 +56,13 @@ class RedSwarmRunner:
         )
 
         if vector is AttackType.FUZZ:
-            dna, result = await FuzzNet(seed=self.seed).run(self.target_url, client=client)
+            # OpenAPI discovery is best-effort inside FuzzNet. Passing the result
+            # here makes discovery explicit at the runner boundary and lets tests
+            # and callers provide a pre-fetched document without extra requests.
+            endpoints = await discover_endpoints(self.target_url, client)
+            dna, result = await FuzzNet(seed=self.seed).run(
+                self.target_url, client=client, endpoints=endpoints
+            )
         elif vector is AttackType.STORM:
             dna, result = await StormLoad(
                 seed=self.seed, default_concurrency=self.storm_concurrency
@@ -64,6 +72,11 @@ class RedSwarmRunner:
                 concurrency=self.storm_concurrency,
                 request_count=self.storm_requests,
                 sla_ms=self.sla_ms,
+            )
+        elif vector is AttackType.LEAK:
+            dna, result = await MemoryStressAgent(seed=self.seed).run(
+                self.target_url,
+                client=client,
             )
         else:
             dna, result = await LatencyDriftAgent(seed=self.seed).run(
@@ -111,9 +124,16 @@ class RedSwarmRunner:
         )
         return dna, result
 
-    async def run_all_parallel(self, client=None) -> list[tuple[AttackDNA, dict]]:
+    async def run_all_parallel(
+        self, client=None, *, include_leak: bool = False
+    ) -> list[tuple[AttackDNA, dict]]:
+        vectors = list(AttackType) if include_leak else [
+            AttackType.FUZZ,
+            AttackType.STORM,
+            AttackType.LATENCY,
+        ]
         return list(
             await asyncio.gather(
-                *(self.run_vector(vector, client=client) for vector in AttackType)
+                *(self.run_vector(vector, client=client) for vector in vectors)
             )
         )

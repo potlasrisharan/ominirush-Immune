@@ -357,17 +357,21 @@ class Arbiter:
         # to alter the target until its in-memory diff has compiled.
         ladder.rollback(pristine)
         await self._restart_target()
-        try:
-            llm_patch = self.llm_patcher.apply_patch(
-                signature.bug_class,
-                signature.sig_id,
-                source=pristine,
-                context=signature.model_dump(mode="json"),
-            )
-        except TypeError:
-            # Keep compatibility with small injected test doubles implementing
-            # the older two-argument callable contract.
-            llm_patch = self.llm_patcher.apply_patch(signature.bug_class, signature.sig_id, pristine)
+        availability = getattr(self.llm_patcher, "is_available", lambda: True)
+        available = availability() if callable(availability) else bool(availability)
+        llm_patch = None
+        if available:
+            try:
+                llm_patch = self.llm_patcher.apply_patch(
+                    signature.bug_class,
+                    signature.sig_id,
+                    source=pristine,
+                    context=signature.model_dump(mode="json"),
+                )
+            except TypeError:
+                # Keep compatibility with small injected test doubles implementing
+                # the older two-argument callable contract.
+                llm_patch = self.llm_patcher.apply_patch(signature.bug_class, signature.sig_id, pristine)
         if llm_patch is not None and llm_patch.applied:
             candidate = getattr(self.llm_patcher, "last_modified_source", None)
             if candidate is None:
@@ -399,6 +403,7 @@ class Arbiter:
         return []
 
     async def run_closed_loop(self) -> ImmunitySummary:
+        run_pristine = self.target_file.read_text(encoding="utf-8")
         if self.fresh:
             self.memory.clear()
         await self._ensure_services()
@@ -632,7 +637,12 @@ class Arbiter:
                     hud.render_summary(summary)
                 return summary
         finally:
-            await self._stop_services()
+            # A failed verification or process startup must never leave a
+            # patched target in the checkout for the next run or test.
+            try:
+                self.target_file.write_text(run_pristine, encoding="utf-8")
+            finally:
+                await self._stop_services()
 
 
 async def event_publish(bus: EventBus, event_type: str, data: dict) -> None:

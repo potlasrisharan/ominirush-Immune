@@ -207,12 +207,21 @@ class TriageEngine:
             if not isinstance(function, ast.AsyncFunctionDef):
                 continue
             has_cache_write = any(
-                isinstance(node, ast.Assign)
-                and any(
-                    isinstance(target, ast.Subscript)
-                    and isinstance(target.value, ast.Name)
-                    and "cache" in target.value.id.lower()
-                    for target in node.targets
+                (
+                    isinstance(node, ast.Assign)
+                    and any(
+                        isinstance(target, ast.Subscript)
+                        and isinstance(target.value, ast.Name)
+                        and "cache" in target.value.id.lower()
+                        for target in node.targets
+                    )
+                )
+                or (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in {"append", "update", "setdefault"}
+                    and isinstance(node.func.value, ast.Name)
+                    and "cache" in node.func.value.id.lower()
                 )
                 for node in ast.walk(function)
             )

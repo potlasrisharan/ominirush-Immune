@@ -34,7 +34,7 @@ async def test_memory_stress_agent_detects_cache_growth_and_reports_stats() -> N
     ) as client:
         dna, result = await agent.run("http://test", client=client)
     assert dna.attack_type is AttackType.LEAK
-    assert dna.target_endpoint == "/api/v1/cache"
+    assert dna.target_endpoint == "/api/v1/cache/item"
     assert result["is_failure"] is True
     assert result["failure_kind"] == "resource_exhaustion"
     assert result["cache_growth"] == 5
