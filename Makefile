@@ -1,4 +1,7 @@
-.PHONY: test demo docker-demo dashboard video clean
+.PHONY: build test demo docker-demo dashboard video clean
+
+build:
+	docker compose build
 
 test:
 	.venv/bin/python scripts/check_python_version.py
