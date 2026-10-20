@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import random
 import time
 
@@ -22,6 +23,7 @@ class LatencyProxy:
         seed: int = 1337,
         listen_host: str = "127.0.0.1",
     ) -> None:
+        self._validate_chaos(delay_seconds, drop_rate)
         self.upstream_host = upstream_host
         self.upstream_port = upstream_port
         self.listen_port = listen_port
@@ -38,7 +40,27 @@ class LatencyProxy:
     def _should_drop(self) -> bool:
         return self._rng.random() < self.drop_rate
 
+    @staticmethod
+    def _validate_chaos(delay_seconds: float, drop_rate: float) -> None:
+        if (
+            isinstance(delay_seconds, bool)
+            or not isinstance(delay_seconds, (int, float))
+            or not math.isfinite(delay_seconds)
+        ):
+            raise ValueError("delay_seconds must be finite")
+        if delay_seconds < 0:
+            raise ValueError("delay_seconds must be non-negative")
+        if (
+            isinstance(drop_rate, bool)
+            or not isinstance(drop_rate, (int, float))
+            or not math.isfinite(drop_rate)
+        ):
+            raise ValueError("drop_rate must be finite")
+        if not 0 <= drop_rate <= 1:
+            raise ValueError("drop_rate must be between 0 and 1")
+
     def set_chaos(self, delay_seconds: float, drop_rate: float) -> None:
+        self._validate_chaos(delay_seconds, drop_rate)
         self.delay_seconds = delay_seconds
         self.drop_rate = drop_rate
 

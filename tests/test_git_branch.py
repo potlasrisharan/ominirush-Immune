@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
 from pathlib import Path
 
@@ -195,6 +196,41 @@ def test_invalid_target_and_missing_post_metrics_are_rejected(tmp_path: Path) ->
         GitBranchEngine(repo).create_heal_branch("sig-incomplete", valid_patch, incomplete)
 
 
+def test_symlink_target_is_rejected(tmp_path: Path) -> None:
+    repo, target, _ = make_repo(tmp_path)
+    original = target.read_text(encoding="utf-8")
+    link = repo / "target-link.py"
+    link.symlink_to(target.name)
+    patch = PatchResult(
+        sig_id="sig-link",
+        strategy="input_guard",
+        file_path="target-link.py",
+        diff="",
+        applied=True,
+        base_file_sha256=hashlib.sha256(original.encode()).hexdigest(),
+    )
+    with pytest.raises(GitBranchError, match="symbolic link"):
+        GitBranchEngine(repo).create_heal_branch("sig-link", patch, verified_verdict())
+
+
+def test_failed_branch_persistence_restores_patched_target(tmp_path: Path, monkeypatch) -> None:
+    repo, target, _ = make_repo(tmp_path)
+    original = target.read_text(encoding="utf-8")
+    patch = make_patch(target, original, "return 'contained'\n")
+    engine = GitBranchEngine(repo)
+    original_run = engine._run
+
+    def fail_update_ref(args, **kwargs):
+        if args[:2] == ["git", "update-ref"]:
+            raise GitBranchError("simulated ref failure")
+        return original_run(args, **kwargs)
+
+    monkeypatch.setattr(engine, "_run", fail_update_ref)
+    with pytest.raises(GitBranchError, match="simulated ref failure"):
+        engine.create_heal_branch("sig-ref-failure", patch, verified_verdict())
+    assert target.read_text(encoding="utf-8") == original
+
+
 def test_unrelated_staged_changes_do_not_leak_into_commit(tmp_path: Path) -> None:
     repo, target, base = make_repo(tmp_path)
     original = target.read_text(encoding="utf-8")
@@ -207,3 +243,59 @@ def test_unrelated_staged_changes_do_not_leak_into_commit(tmp_path: Path) -> Non
     assert git(repo, "rev-parse", f"{commit}^1") == base
     assert git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", commit) == "target_app.py"
     assert git(repo, "diff", "--cached", "--", "unrelated.txt")
+
+
+def test_push_and_create_pr_uses_non_force_push_and_gh_json_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, _, _ = make_repo(tmp_path)
+    body = repo / "pr-body.md"
+    body.write_text("verified repair\n", encoding="utf-8")
+    engine = GitBranchEngine(repo)
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if args[:3] == ["git", "rev-parse", "--verify"]:
+            return subprocess.CompletedProcess(args, 0, "a" * 40 + "\n", "")
+        if args[:4] == ["git", "remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(args, 0, "git@github.com:example/repo.git\n", "")
+        if args[:2] == ["gh", "pr"]:
+            return subprocess.CompletedProcess(args, 0, json.dumps({"url": "https://github.com/example/repo/pull/1"}), "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(engine, "_resolve_repository", lambda: ("main", "b" * 40, repo.as_posix()))
+    monkeypatch.setattr(engine, "_run", fake_run)
+    receipt = engine.push_and_create_pr(
+        "heal/sig-safe",
+        base_branch="main",
+        title="Auto-heal sig-safe",
+        body_file=body,
+        expected_commit="a" * 40,
+    )
+
+    assert receipt.branch == "heal/sig-safe"
+    assert receipt.commit == "a" * 40
+    assert receipt.url == "https://github.com/example/repo/pull/1"
+    assert ["git", "push", "--set-upstream", "origin", "heal/sig-safe:refs/heads/heal/sig-safe"] in calls
+    gh_call = next(call for call in calls if call[:3] == ["gh", "pr", "create"])
+    assert "--body-file" in gh_call
+    assert "--head" in gh_call and "heal/sig-safe" in gh_call
+    assert "--json" not in gh_call
+
+
+def test_push_branch_requires_origin_without_touching_git_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _, base = make_repo(tmp_path)
+    engine = GitBranchEngine(repo)
+
+    def fake_run(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        if args[:3] == ["git", "rev-parse", "--verify"]:
+            return subprocess.CompletedProcess(args, 0, "a" * 40 + "\n", "")
+        if args[:4] == ["git", "remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(args, 2, "", "No such remote")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(engine, "_resolve_repository", lambda: ("main", base, repo.as_posix()))
+    monkeypatch.setattr(engine, "_run", fake_run)
+    with pytest.raises(GitBranchError, match="No Git remote"):
+        engine.push_branch("heal/sig-safe")

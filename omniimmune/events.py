@@ -27,6 +27,10 @@ class EventType:
     ESCALATION_FAILED = "escalation_failed"
     GIT_BRANCH_CREATED = "git_branch_created"
     GIT_BRANCH_FAILED = "git_branch_failed"
+    GIT_BRANCH_PUSHED = "git_branch_pushed"
+    GIT_BRANCH_PUSH_FAILED = "git_branch_push_failed"
+    PR_CREATED = "pr_created"
+    PR_FAILED = "pr_failed"
     RUN_COMPLETE = "run_complete"
 
 
@@ -47,12 +51,27 @@ class EventBus:
     def subscribe(self, event_type: str, callback: Callback) -> None:
         self._subscriptions.append((event_type, callback))
 
+    def subscribe_all(self, callback: Callback) -> None:
+        """Subscribe to every event published by this bus.
+
+        This small convenience method keeps consumers from depending on the
+        wildcard spelling used internally by :meth:`publish` and makes it
+        explicit when a subscriber is interested in the complete event stream.
+        """
+
+        self.subscribe("*", callback)
+
     def unsubscribe(self, event_type: str, callback: Callback) -> None:
         self._subscriptions = [
             (registered_type, registered_callback)
             for registered_type, registered_callback in self._subscriptions
             if not (registered_type == event_type and registered_callback == callback)
         ]
+
+    def unsubscribe_all(self, callback: Callback) -> None:
+        """Remove a callback registered with :meth:`subscribe_all`."""
+
+        self.unsubscribe("*", callback)
 
     async def publish(self, event_type: str, data: dict) -> Event:
         event = Event(type=event_type, data=data)

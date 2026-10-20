@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import os
 import re
 from pathlib import Path
 
@@ -9,10 +8,12 @@ from omniimmune.models import BugClass, IncidentSignature, TelemetrySample
 
 
 _TRACEBACK_FRAME = re.compile(
-    r'File "(?P<file>[^"]+)", line (?P<line>\d+), in (?P<function>[A-Za-z_][A-Za-z0-9_]*)'
+    r'File "(?P<file>[^"]+)", line (?P<line>\d+), in '
+    r'(?P<function>[A-Za-z_][A-Za-z0-9_]*|<[^>\r\n]+>)'
 )
 _EXCEPTION = re.compile(
-    r"^(?P<type>[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception))(?::\s*(?P<message>.*))?$"
+    r"^(?P<type>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)"
+    r"(?::\s*(?P<message>.*))?$"
 )
 
 
@@ -40,7 +41,10 @@ class TriageEngine:
                 target_parts = relative_target.parts
                 if len(path.parts) >= len(target_parts) and path.parts[-len(target_parts):] == target_parts:
                     return Path(*target_parts).as_posix()
-                return os.path.relpath(path, root).replace(os.sep, "/")
+                # Do not expose the host checkout prefix for an unrelated
+                # traceback; the basename is enough for a human-readable
+                # incident without leaking local filesystem layout.
+                return path.name
         return path.as_posix()
 
     @staticmethod

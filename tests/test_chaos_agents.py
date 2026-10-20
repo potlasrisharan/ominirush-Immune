@@ -81,6 +81,17 @@ def test_storm_dna_knobs() -> None:
     assert dna.attack_type is AttackType.STORM
 
 
+def test_chaos_knobs_reject_non_executing_or_invalid_faults() -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        StormLoad().build_dna(concurrency=0)
+    with pytest.raises(ValueError, match="positive integer"):
+        StormLoad().build_dna(request_count=0)
+    with pytest.raises(ValueError, match="non-negative"):
+        LatencyProxy("localhost", 9000, delay_seconds=-1)
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        LatencyProxy("localhost", 9000, drop_rate=1.1)
+
+
 @pytest.mark.asyncio
 async def test_storm_against_target_populates_stats() -> None:
     agent = StormLoad(default_concurrency=10)
@@ -293,6 +304,8 @@ async def test_runner_artifacts_events_and_replay(tmp_path, monkeypatch) -> None
         EventType.ATTACK_FINISHED,
     ]
     assert bus.history[1].data["dna_id"] == fuzz_dna.dna_id
+    assert bus.history[1].data["dna_sha256"] == fuzz_dna.sha256
+    assert bus.history[2].data["dna_sha256"] == fuzz_dna.sha256
     assert fuzz_replay["status_code"] == fuzz_result["status_code"]
     assert fuzz_replay["is_failure"] == fuzz_result["is_failure"]
 

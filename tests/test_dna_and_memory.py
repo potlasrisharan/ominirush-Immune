@@ -15,7 +15,7 @@ from omniimmune.models import (
     IncidentSignature,
     ImmunitySummary,
 )
-from omniimmune.report import generate_html, generate_pr_template, generate_prometheus_metrics
+from omniimmune.report import ReportGenerator, generate_html, generate_pr_template, generate_prometheus_metrics
 
 
 def test_attack_dna_defaults_and_hash_exclude_metadata() -> None:
@@ -297,6 +297,17 @@ def test_reports_sanitize_absolute_culprits_and_diff_headers(tmp_path) -> None:
     assert "+++ b/target_app/app.py" in html
 
 
+def test_markdown_report_contains_incident_postmortem_section(tmp_path) -> None:
+    summary = ImmunitySummary.compute(incidents_total=1, incidents_verified=1).model_copy(
+        update={"incidents": [{"sig_id": "sig-report", "culprit": "/tmp/target_app/app.py:37"}]}
+    )
+    content = ReportGenerator().generate(summary, tmp_path / "INCIDENT_REPORT.md")
+    assert "## Executive Summary" in content
+    assert "## Event Timeline" in content
+    assert "## Incident Post-Mortem" in content
+    assert "/tmp/" not in content
+
+
 def test_prometheus_metrics_export(tmp_path) -> None:
     summary = ImmunitySummary.compute(
         incidents_total=3,
@@ -311,6 +322,11 @@ def test_prometheus_metrics_export(tmp_path) -> None:
     assert "omniimmune_incidents_verified 2" in content
     assert "omniimmune_incidents_total 3" in content
     assert "omniimmune_mean_survival_rate 0.75" in content
+    assert "# TYPE omni_immunity_score gauge\nomni_immunity_score 75" in content
+    assert "omni_incidents_verified 2" in content
+    assert "omni_incidents_total 3" in content
+    assert "omni_golden_regression_pass 1" in content
+    assert "omni_survival_rate_mean 0.75" in content
 
 
 def test_pr_template_contains_culprit_metrics_diff_proof_and_checklist(tmp_path) -> None:

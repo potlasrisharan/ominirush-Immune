@@ -19,13 +19,28 @@ class VerifierEngine:
     async def check_golden_regression(self, client: httpx.AsyncClient) -> bool:
         try:
             health = await self._get_json(client, "/health")
-            if health.status_code != 200 or health.json().get("status") != "ok":
+            health_payload = health.json()
+            if (
+                health.status_code != 200
+                or not isinstance(health_payload, dict)
+                or health_payload.get("status") != "ok"
+            ):
                 return False
             catalog = await self._get_json(client, "/api/v1/catalog")
-            if catalog.status_code != 200 or "catalog" not in catalog.json():
+            catalog_payload = catalog.json()
+            if (
+                catalog.status_code != 200
+                or not isinstance(catalog_payload, dict)
+                or not isinstance(catalog_payload.get("catalog"), list)
+            ):
                 return False
             status = await self._get_json(client, "/api/v1/status")
-            return status.status_code == 200 and bool(status.json().get("healthy"))
+            status_payload = status.json()
+            return (
+                status.status_code == 200
+                and isinstance(status_payload, dict)
+                and status_payload.get("healthy") is True
+            )
         except (asyncio.TimeoutError, httpx.HTTPError, ValueError):
             return False
 
@@ -37,6 +52,8 @@ class VerifierEngine:
         client: httpx.AsyncClient,
         sla_ms: float = 1500.0,
     ) -> VerificationVerdict:
+        if not dna.verify_integrity():
+            raise ValueError("Attack DNA integrity check failed")
         started = time.perf_counter()
         replay_kwargs: dict[str, object] = {}
         if dna.attack_type is AttackType.LATENCY:
@@ -73,7 +90,7 @@ class VerifierEngine:
         if dna.attack_type is AttackType.STORM and "stats" in result:
             after = LatencyStats.model_validate(result["stats"])
 
-        handled_status = status_code in {200, 400, 408, 504}
+        handled_status = status_code in {200, 201, 202, 204, 400, 408, 422, 504}
         no_timeout = status_code != 0 and result.get("failure_kind") not in {"hang", "crash"}
         attack_passed = handled_status and no_timeout and after.p99_ms <= sla_ms
         # A controlled 504 is the explicit upstream-timeout fallback and is a

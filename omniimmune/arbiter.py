@@ -50,6 +50,7 @@ class Arbiter:
         seed: int = 1337,
         fresh: bool = False,
         no_ui: bool = False,
+        push_pr: bool = False,
     ) -> None:
         if mode not in {"docker", "local"}:
             raise ValueError("mode must be docker or local")
@@ -59,6 +60,7 @@ class Arbiter:
         self.seed = seed
         self.fresh = fresh
         self.no_ui = no_ui
+        self.push_pr = push_pr
         self.root = Path(__file__).resolve().parents[1]
         self.target_file = self.root / "target_app" / "app.py"
         self.memory = ImmuneMemory(os.getenv("OMNI_MEMORY_DIR", str(self.root / "artifacts" / "memory")))
@@ -258,12 +260,23 @@ class Arbiter:
                     "details": [],
                     "error": str(exc) or exc.__class__.__name__,
                 }
-            escalation_passed = bool(escalation.get("all_survived"))
+            # A strict escalation verdict requires evidence for every one of
+            # the three deterministic mutations.  Do not certify a partial
+            # or malformed result merely because its summary flag is truthy.
+            try:
+                mutation_count = int(escalation.get("mutations_tested", 0))
+            except (TypeError, ValueError):
+                mutation_count = 0
+            details = escalation.get("details", [])
+            escalation_passed = bool(
+                escalation.get("all_survived")
+                and mutation_count == 3
+            )
             verdict = baseline.model_copy(
                 update={
                     "passed": baseline.passed and escalation_passed,
                     "escalation_passed": escalation_passed,
-                    "mutations_tested": int(escalation.get("mutations_tested", 0)),
+                    "mutations_tested": mutation_count,
                 }
             )
             event_data = {
@@ -271,7 +284,7 @@ class Arbiter:
                 "dna_id": dna.dna_id,
                 "strategy": patch.strategy,
                 "mutations_tested": verdict.mutations_tested,
-                "details": escalation.get("details", []),
+                "details": details if isinstance(details, list) else [],
             }
             if escalation_passed:
                 await self.event_bus.publish(EventType.ESCALATION_PASSED, event_data)
@@ -490,18 +503,63 @@ class Arbiter:
                     "timeline": [event.model_dump(mode="json") for event in self.event_bus.history],
                     "patch_diffs": self._patch_diffs,
                 })
-                report_path = Path(os.getenv("OMNI_REPORT_PATH", str(self.root / "INCIDENT_REPORT.md")))
-                ReportGenerator(self.event_bus).generate(summary, report_path)
-                html_report_path = Path(
-                    os.getenv("OMNI_HTML_REPORT_PATH", str(self.root / "artifacts" / "report.html"))
-                )
-                generate_html(summary, html_report_path)
                 pr_dir = Path(os.getenv("OMNI_PR_DIR", str(self.root / "artifacts" / "prs")))
                 pr_template_paths = [
                     str(generate_pr_template(incident, pr_dir))
                     for incident in self._incidents
                     if incident.get("verdict") == "PASS"
                 ]
+                if self.push_pr:
+                    for incident, body_path in zip(
+                        (incident for incident in self._incidents if incident.get("verdict") == "PASS"),
+                        pr_template_paths,
+                    ):
+                        branch = incident.get("branch")
+                        if incident.get("branch_status") != "CREATED" or not branch:
+                            incident["pr_status"] = "NOT_ATTEMPTED"
+                            continue
+                        try:
+                            receipt = self.git_engine.push_and_create_pr(
+                                str(branch),
+                                base_branch=str(incident.get("original_branch") or self.git_engine.original_branch or ""),
+                                title=f"Auto-heal {incident.get('sig_id', 'incident')}",
+                                body_file=body_path,
+                                expected_commit=incident.get("commit"),
+                            )
+                            incident.update({"push_status": "PUSHED", "pr_status": "CREATED", "pr_url": receipt.url})
+                            await self.event_bus.publish(
+                                EventType.GIT_BRANCH_PUSHED,
+                                {"sig_id": incident.get("sig_id"), "branch": receipt.branch, "commit": receipt.commit},
+                            )
+                            await self.event_bus.publish(
+                                EventType.PR_CREATED,
+                                {"sig_id": incident.get("sig_id"), "branch": receipt.branch, "url": receipt.url},
+                            )
+                        except GitBranchError as exc:
+                            incident.update({"push_status": "FAILED", "pr_status": "FAILED", "pr_error": str(exc)})
+                            await self.event_bus.publish(
+                                EventType.GIT_BRANCH_PUSH_FAILED,
+                                {"sig_id": incident.get("sig_id"), "branch": branch, "error": str(exc)},
+                            )
+                            await self.event_bus.publish(
+                                EventType.PR_FAILED,
+                                {"sig_id": incident.get("sig_id"), "branch": branch, "error": str(exc)},
+                            )
+                            logger.error("Verified repair could not be pushed or opened as a PR: %s", exc)
+                # Push/PR lifecycle events and receipts are part of the final
+                # artifact just like branch creation and verification events.
+                summary = summary.model_copy(
+                    update={
+                        "incidents": self._incidents,
+                        "timeline": [event.model_dump(mode="json") for event in self.event_bus.history],
+                    }
+                )
+                report_path = Path(os.getenv("OMNI_REPORT_PATH", str(self.root / "INCIDENT_REPORT.md")))
+                ReportGenerator(self.event_bus).generate(summary, report_path)
+                html_report_path = Path(
+                    os.getenv("OMNI_HTML_REPORT_PATH", str(self.root / "artifacts" / "report.html"))
+                )
+                generate_html(summary, html_report_path)
                 summary = summary.model_copy(
                     update={
                         "report_path": str(report_path),

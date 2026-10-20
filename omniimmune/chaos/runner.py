@@ -76,22 +76,38 @@ class RedSwarmRunner:
 
         dna.to_file(Path(self.artifacts_dir) / f"{dna.dna_id}.json")
         if result["is_failure"]:
+            failure_data = {
+                "dna_id": dna.dna_id,
+                "dna_sha256": dna.sha256,
+                "attack_type": vector.value,
+                "bug_class_hint": ATTACK_BUG_HINT[vector].value,
+                "endpoint": dna.target_endpoint,
+                "failure_kind": result["failure_kind"],
+                "status_code": result["status_code"],
+                "elapsed_ms": result["elapsed_ms"],
+                "error": result["error"],
+            }
+            if "stats" in result:
+                stats = result["stats"]
+                failure_data["stats"] = (
+                    stats.model_dump(mode="json")
+                    if hasattr(stats, "model_dump")
+                    else stats
+                )
+            if "status_codes" in result:
+                failure_data["status_codes"] = result["status_codes"]
             await self.event_bus.publish(
                 EventType.FAILURE_DETECTED,
-                {
-                    "dna_id": dna.dna_id,
-                    "attack_type": vector.value,
-                    "bug_class_hint": ATTACK_BUG_HINT[vector].value,
-                    "endpoint": dna.target_endpoint,
-                    "failure_kind": result["failure_kind"],
-                    "status_code": result["status_code"],
-                    "elapsed_ms": result["elapsed_ms"],
-                    "error": result["error"],
-                },
+                failure_data,
             )
         await self.event_bus.publish(
             EventType.ATTACK_FINISHED,
-            {"dna_id": dna.dna_id, "attack_type": vector.value, "is_failure": result["is_failure"]},
+            {
+                "dna_id": dna.dna_id,
+                "dna_sha256": dna.sha256,
+                "attack_type": vector.value,
+                "is_failure": result["is_failure"],
+            },
         )
         return dna, result
 

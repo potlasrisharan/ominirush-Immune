@@ -11,6 +11,7 @@ from omniimmune.chaos.fuzzer import FuzzNet
 from omniimmune.healer.patcher import PatchLadder
 from omniimmune.healer.triage import TriageEngine
 from omniimmune.models import AttackType, BugClass, IncidentSignature
+from omniimmune.chaos.latency import LatencyDriftAgent
 from omniimmune.verifier.verifier import VerifierEngine
 
 
@@ -52,6 +53,19 @@ ValueError: CRITICAL_ORDER_PANIC: Negative quantity
     )
 
 
+def test_triage_traceback_handles_module_frame_without_exposing_host_path() -> None:
+    stderr = """Traceback (most recent call last):
+  File "/Users/private-user/checkout/worker.py", line 9, in <module>
+    raise CustomFailure("boom")
+CustomFailure: boom
+"""
+    signature = TriageEngine().diagnose_from_exception(stderr, "/api/v1/order")
+    assert signature.exception_type == "CustomFailure"
+    assert signature.culprit_file == "worker.py"
+    assert signature.culprit_function == "<module>"
+    assert "/Users/private-user" not in signature.culprit_file
+
+
 def test_triage_ast_detects_lock_and_uncapped_client() -> None:
     engine = TriageEngine(TARGET_SOURCE)
     starvation = engine.diagnose_from_sla_breach(
@@ -82,6 +96,16 @@ def test_patch_ladder_panic_guard_compiles_and_generates_diff(tmp_path: Path) ->
     assert "+++ b/" in result.diff
     PatchLadder(target).rollback(pristine)
     assert target.read_text(encoding="utf-8") == pristine
+
+
+def test_patch_ladder_preserves_module_docstring(tmp_path: Path) -> None:
+    target = copy_target(tmp_path)
+    target.write_text('"""Target service metadata."""\n\n' + target.read_text(encoding="utf-8"), encoding="utf-8")
+    PatchLadder(target).apply_patch(BugClass.PANIC, "sig-docstring")
+    module = compile(target.read_text(encoding="utf-8"), str(target), "exec")
+    namespace: dict[str, object] = {}
+    exec(module, namespace)
+    assert namespace["__doc__"] == "Target service metadata."
 
 
 def test_patch_ladder_concurrency_uses_async_lock_and_nonblocking_sleep(tmp_path: Path) -> None:
@@ -148,3 +172,50 @@ async def test_verifier_golden_regression_rejects_broken_health() -> None:
         transport=httpx.MockTransport(handler), base_url="http://test"
     ) as client:
         assert await VerifierEngine("http://test").check_golden_regression(client) is False
+
+
+@pytest.mark.asyncio
+async def test_verifier_golden_regression_requires_object_payloads_and_boolean_health() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(200, json=[{"status": "ok"}])
+        if request.url.path == "/api/v1/catalog":
+            return httpx.Response(200, json={"catalog": []})
+        return httpx.Response(200, json={"healthy": "false"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://test"
+    ) as client:
+        assert await VerifierEngine("http://test").check_golden_regression(client) is False
+
+
+@pytest.mark.asyncio
+async def test_verifier_rejects_tampered_attack_dna_before_replay() -> None:
+    dna = FuzzNet().build_dna(0).model_copy(update={"payload": {"quantity": 999}})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(500))) as client:
+        with pytest.raises(ValueError, match="integrity"):
+            await VerifierEngine("http://test").verify_attack_dna(
+                dna, sig_id="sig-test", strategy_used="test", client=client
+            )
+
+
+@pytest.mark.asyncio
+async def test_verifier_accepts_handled_validation_response() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"})
+        if request.url.path == "/api/v1/catalog":
+            return httpx.Response(200, json={"catalog": []})
+        if request.url.path == "/api/v1/status":
+            return httpx.Response(200, json={"healthy": True})
+        return httpx.Response(422, json={"detail": "invalid delay"})
+
+    dna = LatencyDriftAgent().build_dna(4.0)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://test"
+    ) as client:
+        verdict = await VerifierEngine("http://test").verify_attack_dna(
+            dna, sig_id="sig-timeout", strategy_used="explicit_timeout_guard", client=client
+        )
+    assert verdict.passed is True
+    assert verdict.status_codes == {"422": 1}

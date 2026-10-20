@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import os
 import re
@@ -8,12 +9,25 @@ import subprocess
 import tempfile
 import unicodedata
 from pathlib import Path
+from urllib.parse import urlparse
 
 from omniimmune.models import PatchResult, VerificationVerdict
 
 
 class GitBranchError(RuntimeError):
     """Raised when a verified repair cannot be persisted safely in Git."""
+
+
+class PullRequestResult:
+    """Receipt for a branch that was pushed and turned into a pull request."""
+
+    def __init__(self, branch: str, commit: str, url: str) -> None:
+        self.branch = branch
+        self.commit = commit
+        self.url = url
+
+    def __repr__(self) -> str:
+        return f"PullRequestResult(branch={self.branch!r}, commit={self.commit!r}, url={self.url!r})"
 
 
 class GitBranchEngine:
@@ -119,6 +133,12 @@ class GitBranchEngine:
         if not isinstance(file_path, str) or not file_path.strip():
             raise GitBranchError("patch_result.file_path must be a non-empty path")
         supplied = Path(file_path).expanduser()
+        # Resolve only after rejecting symlinks.  Otherwise a symlink inside
+        # the checkout could silently redirect a patch to another tracked
+        # file and defeat the target-path safety check.
+        candidate = supplied if supplied.is_absolute() else self._root / supplied
+        if candidate.is_symlink():
+            raise GitBranchError("Patch target must not be a symbolic link")
         target = supplied.resolve() if supplied.is_absolute() else (self._root / supplied).resolve()
         try:
             relative = target.relative_to(self._root)
@@ -233,6 +253,108 @@ class GitBranchEngine:
                 deleted.append(branch_name)
         return deleted
 
+    def push_branch(self, branch_name: str, *, expected_commit: str | None = None) -> str:
+        """Push a generated repair branch without ever force-updating a remote.
+
+        ``gh`` uses the user's existing authentication, while Git itself owns
+        the transport.  No token or credential is accepted as an argument or
+        copied into the subprocess environment.  A remote branch that already
+        exists is intentionally left untouched by the non-force push.
+        """
+        self._resolve_repository()
+        if not isinstance(branch_name, str) or not branch_name.startswith("heal/"):
+            raise GitBranchError("Only generated heal branches may be pushed")
+        check_format = self._run(["git", "check-ref-format", "--branch", branch_name], check=False)
+        if check_format.returncode != 0:
+            raise GitBranchError(f"Invalid repair branch name: {branch_name}")
+        local = self._run(["git", "rev-parse", "--verify", branch_name], check=False)
+        if local.returncode != 0 or not local.stdout.strip():
+            raise GitBranchError(f"Repair branch does not exist locally: {branch_name}")
+        commit = local.stdout.strip()
+        if expected_commit and commit != expected_commit:
+            raise GitBranchError(
+                f"Repair branch changed before push: expected {expected_commit}, found {commit}"
+            )
+        remote_check = self._run(["git", "remote", "get-url", "origin"], check=False)
+        if remote_check.returncode != 0 or not remote_check.stdout.strip():
+            raise GitBranchError("No Git remote named 'origin' is configured; refusing to push")
+        self._run(
+            ["git", "push", "--set-upstream", "origin", f"{branch_name}:refs/heads/{branch_name}"],
+            timeout=60.0,
+        )
+        return commit
+
+    def create_pull_request(
+        self,
+        branch_name: str,
+        *,
+        base_branch: str,
+        title: str,
+        body_file: Path | str,
+    ) -> str:
+        """Create one PR with ``gh`` and return its URL.
+
+        The body is passed as a file so shell quoting cannot alter it.  The
+        command's output is parsed in both JSON and legacy plain-URL forms to
+        support the installed GitHub CLI versions used by developers and CI.
+        """
+        self._resolve_repository()
+        if not branch_name.startswith("heal/"):
+            raise GitBranchError("Only generated heal branches may open pull requests")
+        if not isinstance(base_branch, str) or not base_branch.strip():
+            raise GitBranchError("A non-empty base branch is required for pull request creation")
+        supplied_body = Path(body_file).expanduser()
+        body = supplied_body if supplied_body.is_absolute() else self._root / supplied_body
+        if not body.is_file() or body.is_symlink():
+            raise GitBranchError(f"Pull request body file is not a regular file: {body_file}")
+        result = self._run(
+            [
+                "gh",
+                "pr",
+                "create",
+                "--head",
+                branch_name,
+                "--base",
+                base_branch,
+                "--title",
+                title,
+                "--body-file",
+                str(body),
+            ],
+            timeout=60.0,
+        )
+        output = result.stdout.strip()
+        try:
+            payload = json.loads(output)
+        except (ValueError, TypeError):
+            payload = None
+        url = payload.get("url", "") if isinstance(payload, dict) else output.splitlines()[-1] if output else ""
+        if not isinstance(url, str) or not url.strip():
+            raise GitBranchError("GitHub CLI created no pull-request URL")
+        parsed = urlparse(url.strip())
+        if parsed.scheme not in {"https"} or not parsed.netloc:
+            raise GitBranchError("GitHub CLI returned an invalid pull-request URL")
+        return url.strip()
+
+    def push_and_create_pr(
+        self,
+        branch_name: str,
+        *,
+        base_branch: str,
+        title: str,
+        body_file: Path | str,
+        expected_commit: str | None = None,
+    ) -> PullRequestResult:
+        """Push a verified repair branch and create its GitHub pull request."""
+        commit = self.push_branch(branch_name, expected_commit=expected_commit)
+        url = self.create_pull_request(
+            branch_name,
+            base_branch=base_branch,
+            title=title,
+            body_file=body_file,
+        )
+        return PullRequestResult(branch=branch_name, commit=commit, url=url)
+
     def create_heal_branch(
         self,
         sig_id: str,
@@ -253,6 +375,9 @@ class GitBranchEngine:
         branch_exists = ref_check.returncode == 0
         if branch_exists and not overwrite:
             raise GitBranchError(f"Repair branch already exists; refusing to overwrite: {branch_name}")
+        existing_commit = (
+            self._run(["git", "rev-parse", ref_name]).stdout.strip() if branch_exists else None
+        )
         check_format = self._run(["git", "check-ref-format", "--branch", branch_name], check=False)
         if check_format.returncode != 0:
             detail = (check_format.stderr or check_format.stdout).strip()
@@ -279,6 +404,7 @@ class GitBranchEngine:
 
         temporary_index: str | None = None
         branch_created = False
+        restore_on_failure = True
         try:
             with tempfile.NamedTemporaryFile(prefix="omniimmune-index-", delete=False) as index_file:
                 temporary_index = index_file.name
@@ -292,18 +418,17 @@ class GitBranchEngine:
                 env=isolated_env,
                 input_text=message,
             ).stdout.strip()
-            if branch_exists:
-                if not self._delete_branch(branch_name):
-                    raise GitBranchError(
-                        f"Repair branch is checked out; refusing to overwrite: {branch_name}"
-                    )
+            if branch_exists and branch_name in self._checked_out_branches():
+                raise GitBranchError(
+                    f"Repair branch is checked out; refusing to overwrite: {branch_name}"
+                )
             update = self._run(
-                ["git", "update-ref", ref_name, commit, "0" * 40],
+                ["git", "update-ref", ref_name, commit, existing_commit or "0" * 40],
                 check=False,
             )
             if update.returncode != 0:
                 existing = self._run(["git", "show-ref", "--verify", "--quiet", ref_name], check=False)
-                if existing.returncode == 0:
+                if existing.returncode == 0 and not branch_exists:
                     raise GitBranchError(
                         f"Repair branch appeared during creation; refusing to overwrite: {branch_name}"
                     )
@@ -315,6 +440,7 @@ class GitBranchEngine:
             self.last_branch_name = branch_name
             self.last_commit_sha = commit
             self._restore_target(relative_path, target, original_head)
+            restore_on_failure = False
             self.last_cleanup_completed = True
             return branch_name
         except GitBranchError:
@@ -329,6 +455,14 @@ class GitBranchEngine:
                 ) from exc
             raise GitBranchError(f"Unable to create repair branch {branch_name}: {exc}") from exc
         finally:
+            if restore_on_failure:
+                try:
+                    self._restore_target(relative_path, target, original_head)
+                except Exception:
+                    # Preserve the original failure; callers can inspect the
+                    # worktree and retry explicitly if restoration itself is
+                    # unavailable.
+                    pass
             if temporary_index is not None:
                 try:
                     os.unlink(temporary_index)

@@ -93,6 +93,16 @@ def _ensure_import(module: cst.Module, statement: cst.SimpleStatementLine) -> cs
 
     insert_at = 0
     for index, existing in enumerate(module.body):
+        if (
+            index == 0
+            and isinstance(existing, cst.SimpleStatementLine)
+            and len(existing.body) == 1
+            and isinstance(existing.body[0], cst.Expr)
+            and isinstance(existing.body[0].value, cst.SimpleString)
+        ):
+            # Keep a module docstring first; moving it below an injected
+            # import changes ``__doc__`` and can break runtime metadata.
+            insert_at = 1
         if _is_import(existing, "__future__") or _is_import(existing, "fastapi") or _is_import(
             existing, "httpx"
         ) or _is_import(existing, "threading") or _is_import(existing, "time"):

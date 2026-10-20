@@ -102,22 +102,31 @@ class EscalationEngine:
         if original_dna.attack_type is AttackType.STORM or endpoint == "/api/v1/inventory/reserve":
             base_concurrency = max(1, min(original_dna.concurrency, self.MAX_CONCURRENCY))
             base_count = max(1, min(original_dna.request_count, self.MAX_REQUEST_COUNT))
-            first = self._build(
-                original_dna,
-                concurrency=min(self.MAX_CONCURRENCY, max(base_concurrency + 1, 2)),
-                request_count=min(self.MAX_REQUEST_COUNT, max(base_count + 1, 2)),
-            )
-            second = self._build(
-                original_dna,
-                concurrency=base_concurrency,
-                request_count=min(self.MAX_REQUEST_COUNT, max(base_count * 2, base_count + 1)),
-            )
-            third = self._build(
-                original_dna,
-                concurrency=min(self.MAX_CONCURRENCY, max(base_concurrency * 2, 2)),
-                request_count=base_count,
-            )
-            return [first, second, third]
+            # Pick from bounded neighboring workloads while deduplicating at
+            # the edges (for example, concurrency=16/request_count=32).  A
+            # capped ``+1`` ladder otherwise silently produces fewer than
+            # three distinct mutations.
+            candidates = [
+                (min(self.MAX_CONCURRENCY, base_concurrency + 1), base_count),
+                (base_concurrency, min(self.MAX_REQUEST_COUNT, base_count + 1)),
+                (max(1, base_concurrency - 1), base_count),
+                (base_concurrency, max(1, base_count - 1)),
+                (
+                    min(self.MAX_CONCURRENCY, base_concurrency + 1),
+                    min(self.MAX_REQUEST_COUNT, base_count + 1),
+                ),
+                (max(1, base_concurrency - 1), max(1, base_count - 1)),
+            ]
+            workloads: list[tuple[int, int]] = []
+            for workload in candidates:
+                if workload != (base_concurrency, base_count) and workload not in workloads:
+                    workloads.append(workload)
+                if len(workloads) == 3:
+                    break
+            return [
+                self._build(original_dna, concurrency=concurrency, request_count=request_count)
+                for concurrency, request_count in workloads
+            ]
 
         # Query-driven endpoints must be changed through relevant query
         # parameters.  Keep delay values finite so a mutation cannot create an

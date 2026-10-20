@@ -246,6 +246,14 @@ def generate_prometheus_metrics(
 ) -> str:
     """Write the closed-loop summary as Prometheus text-format gauges."""
     metrics = (
+        # Keep the public metric names aligned with the dashboard/export
+        # contract.  The legacy ``omniimmune_*`` aliases below are retained so
+        # existing consumers do not break during the rename.
+        ("omni_immunity_score", _value(summary, "score", 0)),
+        ("omni_incidents_verified", _value(summary, "incidents_verified", 0)),
+        ("omni_incidents_total", _value(summary, "incidents_total", 0)),
+        ("omni_golden_regression_pass", int(bool(_value(summary, "regression_passed", False)))),
+        ("omni_survival_rate_mean", _value(summary, "mean_survival_rate", 0.0)),
         ("omniimmune_score", _value(summary, "score", 0)),
         ("omniimmune_incidents_verified", _value(summary, "incidents_verified", 0)),
         ("omniimmune_incidents_total", _value(summary, "incidents_total", 0)),
@@ -380,6 +388,8 @@ class ReportGenerator:
         patches = summary.patch_diffs or [incident.get("diff", "") for incident in incidents]
         for index, diff in enumerate(patches, 1):
             lines.extend([f"### Patch {index}", "", "```diff", _relative_diff(diff).rstrip(), "```", ""])
+
+        lines.extend(["## Incident Post-Mortem", "", "The incident evidence, root-cause analysis, replay proof, and generalized-immunity results are recorded above for each repaired signature.", ""])
 
         lines.extend([
             "## Closed-Loop Sequence",

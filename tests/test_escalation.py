@@ -95,6 +95,13 @@ async def test_mutations_for_bodyless_and_query_endpoints_change_relevant_worklo
     storm_mutations = EscalationEngine().mutate_dna(storm_original)
     assert len({(dna.concurrency, dna.request_count) for dna in storm_mutations}) == 3
     assert all(dna.payload is None and dna.target_endpoint == storm_original.target_endpoint for dna in storm_mutations)
+    edge_original = StormLoad().build_dna(concurrency=16, request_count=32)
+    edge_mutations = EscalationEngine().mutate_dna(edge_original)
+    assert len(edge_mutations) == 3
+    assert len({(dna.concurrency, dna.request_count) for dna in edge_mutations}) == 3
+    assert all(
+        (dna.concurrency, dna.request_count) != (16, 32) for dna in edge_mutations
+    )
 
     latency_original = LatencyDriftAgent().build_dna(delay_seconds=4.0)
     latency_mutations = EscalationEngine().mutate_dna(latency_original)
@@ -262,6 +269,42 @@ async def test_cached_patch_runs_escalation_only_after_baseline_passes(tmp_path:
         "escalation_started",
         "escalation_passed",
     ]
+
+
+@pytest.mark.asyncio
+async def test_partial_escalation_summary_cannot_certify_repair(tmp_path: Path, monkeypatch) -> None:
+    arbiter = Arbiter("http://test", "http://upstream", mode="local", no_ui=True)
+    arbiter.memory = ImmuneMemory(tmp_path / "memory")
+    signature = IncidentSignature(
+        sig_id="sig-partial",
+        bug_class=BugClass.PANIC,
+        failure_kind="exception",
+        endpoint="/api/v1/order",
+    )
+    dna = FuzzNet().build_dna(0)
+    arbiter.memory.save_patch(signature.sig_id, {"strategy": "cached", "diff": "", "verified": True})
+    monkeypatch.setattr(arbiter, "_restart_target", lambda: asyncio.sleep(0))
+
+    class FakeVerifier:
+        async def verify_attack_dna(self, *args, **kwargs):
+            return _baseline_verdict(True)
+
+    class PartialEscalation:
+        async def run_escalation(self, *args, **kwargs):
+            return {"all_survived": True, "mutations_tested": 2, "details": []}
+
+    arbiter.escalation = PartialEscalation()
+    _, verdict = await arbiter._patch_and_verify(
+        signature,
+        dna,
+        FakeVerifier(),
+        object(),
+        PatchLadder(tmp_path / "unused.py"),
+        "",
+    )
+    assert verdict.passed is False
+    assert verdict.escalation_passed is False
+    assert verdict.mutations_tested == 2
 
 
 @pytest.mark.asyncio

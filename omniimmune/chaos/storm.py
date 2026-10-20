@@ -13,6 +13,12 @@ from .common import compute_latency_stats, response_body
 
 class StormLoad:
     def __init__(self, seed: int = 1337, default_concurrency: int = 50) -> None:
+        if (
+            isinstance(default_concurrency, bool)
+            or not isinstance(default_concurrency, int)
+            or default_concurrency < 1
+        ):
+            raise ValueError("default_concurrency must be a positive integer")
         self.seed = seed
         self.default_concurrency = default_concurrency
 
@@ -21,6 +27,18 @@ class StormLoad:
     ) -> AttackDNA:
         actual_concurrency = concurrency if concurrency is not None else self.default_concurrency
         actual_count = request_count if request_count is not None else self.default_concurrency
+        if (
+            isinstance(actual_concurrency, bool)
+            or not isinstance(actual_concurrency, int)
+            or actual_concurrency < 1
+        ):
+            raise ValueError("concurrency must be a positive integer")
+        if (
+            isinstance(actual_count, bool)
+            or not isinstance(actual_count, int)
+            or actual_count < 1
+        ):
+            raise ValueError("request_count must be a positive integer")
         return AttackDNA(
             attack_type=AttackType.STORM,
             target_endpoint="/api/v1/inventory/reserve",
@@ -39,6 +57,18 @@ class StormLoad:
         sla_ms: float = 1500.0,
         request_timeout: float = 30.0,
     ) -> dict:
+        if (
+            isinstance(dna.concurrency, bool)
+            or not isinstance(dna.concurrency, int)
+            or dna.concurrency < 1
+        ):
+            raise ValueError("DNA concurrency must be a positive integer")
+        if (
+            isinstance(dna.request_count, bool)
+            or not isinstance(dna.request_count, int)
+            or dna.request_count < 1
+        ):
+            raise ValueError("DNA request_count must be a positive integer")
         owned_client = client is None
         active_client = client if client is not None else httpx.AsyncClient()
         semaphore = asyncio.Semaphore(dna.concurrency)
