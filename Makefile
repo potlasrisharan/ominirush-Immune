@@ -1,6 +1,7 @@
 .PHONY: test demo docker-demo dashboard video clean
 
 test:
+	.venv/bin/python scripts/check_python_version.py
 	.venv/bin/python -m pytest -v tests/
 
 demo:
