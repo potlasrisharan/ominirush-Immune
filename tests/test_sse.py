@@ -19,7 +19,7 @@ async def test_dashboard_broadcaster_updates_state_and_fans_out_events() -> None
     bus = EventBus()
     store = DashboardStore()
     broadcaster = DashboardBroadcaster(bus, store)
-    queue = broadcaster.subscribe()
+    queue = await broadcaster.subscribe()
     try:
         await bus.publish(
             EventType.PATCH_APPLIED,

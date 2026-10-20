@@ -184,7 +184,7 @@ class DashboardBroadcaster:
         self._lock = RLock()
         self.event_bus.subscribe_all(self._on_event)
 
-    def subscribe(self) -> asyncio.Queue[dict[str, Any]]:
+    async def subscribe(self) -> asyncio.Queue[dict[str, Any]]:
         """Register the current async task and return its event queue."""
 
         loop = asyncio.get_running_loop()
@@ -277,7 +277,7 @@ class DashboardBroadcaster:
                     self.unsubscribe(queue)
 
     async def stream(self, request: Request):
-        queue = self.subscribe()
+        queue = await self.subscribe()
         try:
             while True:
                 if await request.is_disconnected():
@@ -324,11 +324,14 @@ _DASHBOARD_HTML = r'''<!doctype html>
 :root{color-scheme:dark;--bg:#07101d;--panel:#0b1828;--panel2:#0d2033;--line:#1b3449;--text:#e8f2f5;--muted:#7d98a6;--cyan:#63e7e1;--green:#76e3a4;--amber:#f3bd69;--red:#ff6f80;--blue:#91a9ff;--shadow:0 20px 60px #0006}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% -20%,#173a53 0,#07101d 48%);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.17;background-image:linear-gradient(#7be7e111 1px,transparent 1px),linear-gradient(90deg,#7be7e111 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(to bottom,#000,transparent 80%)}
 .shell{width:min(1500px,calc(100% - 40px));margin:auto;padding:30px 0 45px}.topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:25px}.kicker{color:var(--cyan);font-size:11px;letter-spacing:.18em;font-weight:700}.title{font-size:clamp(28px,4vw,48px);letter-spacing:-.05em;margin:4px 0 5px}.subtitle{color:var(--muted);margin:0}.status{align-items:center;border:1px solid #2b5268;background:#0b2030;border-radius:999px;color:var(--cyan);display:inline-flex;gap:9px;padding:9px 13px;font-size:11px;font-weight:700;letter-spacing:.08em;white-space:nowrap}.dot{background:currentColor;border-radius:50%;box-shadow:0 0 14px currentColor;height:7px;width:7px}.grid{display:grid;grid-template-columns:1.05fr 1.55fr 1fr;gap:15px}.card{background:linear-gradient(145deg,#0d2032e8,#091523e8);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}.card-head{align-items:center;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;padding:14px 16px}.label{font-size:11px;letter-spacing:.13em;color:var(--muted);font-weight:700}.card-body{padding:16px}.score-card{grid-row:span 2;min-height:410px}.score-wrap{display:grid;place-items:center;padding:24px 0 20px;position:relative}.meter{--score:100;width:190px;height:190px;display:grid;place-items:center;border-radius:50%;background:conic-gradient(var(--cyan) calc(var(--score)*1%),#183246 0);box-shadow:0 0 50px #28d8d933}.meter:after{background:var(--bg);border-radius:50%;content:"";position:absolute;width:166px;height:166px}.score{position:relative;text-align:center;z-index:1}.score strong{display:block;font-size:42px;letter-spacing:-.07em}.score span{color:var(--muted);font-size:11px;letter-spacing:.14em}.metrics{display:grid;grid-template-columns:repeat(2,1fr);border-top:1px solid var(--line);margin:0 16px}.metric{padding:14px 5px;border-right:1px solid var(--line)}.metric:last-child{border:0}.metric b{display:block;font-size:20px}.metric small{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.08em}.topology-card{grid-column:span 2}.topology{height:245px;display:block;width:100%}.topology text{fill:var(--text);font-family:inherit;font-size:12px;font-weight:700}.topology .sub{fill:var(--muted);font-size:10px;font-weight:500}.wire{stroke:#2c596a;stroke-dasharray:5 6;stroke-width:1.5}.node{fill:#0d2535;stroke:#3c6b7d;stroke-width:1.5}.node.red{fill:#2c1929;stroke:var(--red)}.node.blue{fill:#18234b;stroke:var(--blue)}.node.vault{fill:#1d2b2b;stroke:var(--green)}.pulse{fill:var(--cyan);filter:drop-shadow(0 0 6px var(--cyan))}.latency-card{grid-column:span 2}.bar-row{display:grid;grid-template-columns:100px 1fr 60px;align-items:center;gap:12px;margin:17px 0}.bar-row label{font-size:12px;color:var(--muted)}.track{background:#183043;border-radius:99px;height:11px;overflow:hidden}.bar{background:linear-gradient(90deg,var(--red),#f69c6b);border-radius:inherit;height:100%;min-width:2px;transition:width .4s ease}.bar.after{background:linear-gradient(90deg,var(--cyan),var(--green))}.bar-row output{font:700 13px ui-monospace,monospace;text-align:right}.diff-card{grid-column:span 2}.diff{background:#07111c;border:1px solid #1d3848;border-radius:9px;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;margin:0;max-height:295px;overflow:auto;padding:13px;white-space:pre-wrap}.diff-line{display:block;min-height:1.6em}.diff-line.add{background:#0a342d;color:#9bf0c6}.diff-line.del{background:#3a1c2a;color:#ff9dad}.diff-line.hunk{color:#9daeff}.diff-line.comment{color:#718b98}.branches{display:flex;flex-direction:column;gap:9px}.branch{align-items:center;background:#0b1927;border:1px solid #1a3444;border-radius:9px;display:flex;gap:10px;justify-content:space-between;padding:10px 11px}.branch-name{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pill{border-radius:99px;font-size:9px;font-weight:800;letter-spacing:.09em;padding:3px 7px}.pill.ready,.pill.verified,.pill.passed{background:#153e35;color:var(--green)}.pill.pending,.pill.healing{background:#3c321a;color:var(--amber)}.pill.failed,.pill.error{background:#481e2c;color:var(--red)}.timeline{list-style:none;margin:0;padding:0}.timeline li{border-left:1px solid #2d5663;margin-left:5px;padding:0 0 14px 16px;position:relative;color:var(--muted)}.timeline li:before{background:var(--cyan);border:3px solid var(--panel);border-radius:50%;content:"";height:7px;left:-5px;position:absolute;top:3px;width:7px}.timeline li:last-child{padding-bottom:0}.timeline strong{color:var(--text);display:block;font-size:12px}.tiny{color:var(--muted);font-size:11px}.refresh{background:transparent;border:1px solid #2d5261;border-radius:7px;color:var(--cyan);cursor:pointer;font:inherit;font-size:11px;padding:6px 9px}.refresh:hover,.refresh:focus-visible{background:#123145;outline:none}.footer{color:#557381;font-size:11px;margin-top:18px;text-align:right}@media(max-width:1050px){.grid{grid-template-columns:1fr 1fr}.score-card{grid-row:auto}.topology-card,.latency-card,.diff-card{grid-column:span 2}}@media(max-width:650px){.shell{width:min(100% - 24px,1500px);padding-top:20px}.topbar{display:block}.status{margin-top:15px}.grid{display:block}.card{margin-bottom:14px}.topology{height:220px}.bar-row{grid-template-columns:78px 1fr 53px;gap:8px}}
-</style>
+ .live-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:0 0 15px}.live-item{background:#0b1828cc;border:1px solid var(--line);border-radius:12px;padding:11px 13px;min-height:76px}.live-item .tiny{margin-bottom:5px}.live-value{display:block;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.live-value.alert{color:var(--red)}.live-value.success{color:var(--green)}.live-value.pulse{animation:live-pulse 1.2s ease-in-out infinite}@keyframes live-pulse{50%{box-shadow:0 0 0 6px #ff6f8030;color:#fff}}
+ @media(max-width:900px){.grid{grid-template-columns:1fr}.live-strip{grid-template-columns:1fr}}
+ </style>
 </head>
 <body>
 <main class="shell">
-  <header class="topbar"><div><div class="kicker">OMNIIMMUNE / LIVE MISSION CONTROL</div><h1 class="title">Resilience command deck</h1><p class="subtitle">Break it · Heal it · Prove it — closed-loop service immunity in real time.</p></div><div class="status"><i class="dot"></i><span id="status">STANDING BY</span></div></header>
+   <header class="topbar"><div><div class="kicker">OMNIIMMUNE / LIVE MISSION CONTROL</div><h1 class="title">Resilience command deck</h1><p class="subtitle">Break it · Heal it · Prove it — closed-loop service immunity in real time.</p></div><div class="status"><i class="dot"></i><span id="status">STANDING BY</span></div></header>
+   <section class="live-strip" aria-label="Live mission telemetry"><div class="live-item"><div class="tiny">ATTACK RADAR</div><span class="live-value" id="attack-indicator">STANDBY</span><span class="tiny" id="attack-target">target awaiting telemetry</span></div><div class="live-item"><div class="tiny">TRIAGE LOCK</div><span class="live-value" id="triage-culprit">culprit awaiting telemetry</span><span class="tiny" id="triage-details">line — · token — · class —</span></div><div class="live-item"><div class="tiny">MUTATION ESCALATION</div><span class="live-value" id="mutation-progress">not started</span><span class="tiny" id="active-branch">branch awaiting verification</span></div></section>
   <section class="grid" aria-label="Mission control dashboard">
     <article class="card score-card"><div class="card-head"><span class="label">RESILIENCE SCORE</span><span class="pill ready" id="score-state">LIVE</span></div><div class="score-wrap"><div class="meter" id="meter"><div class="score"><strong id="score">100/100</strong><span>IMMUNITY INDEX</span></div></div></div><div class="metrics"><div class="metric"><b id="verified">—</b><small>verified</small></div><div class="metric"><b id="vaccinated">—</b><small>vaccinated</small></div></div><div class="card-body"><div class="tiny">Current phase</div><strong id="phase">mission control</strong><div class="tiny" style="margin-top:13px">Last telemetry</div><strong id="updated">Awaiting telemetry</strong></div></article>
     <article class="card topology-card"><div class="card-head"><span class="label">LIVE TOPOLOGY</span><span class="tiny">encrypted control plane</span></div><svg class="topology" viewBox="0 0 760 245" role="img" aria-label="Topology connecting Red Swarm, Target App, Blue Swarm, and Cryptographic Vault"><path class="wire" d="M145 122H275M485 122H615M380 72V43M380 174V202"/><circle class="pulse" cx="210" cy="122" r="3"/><circle class="pulse" cx="550" cy="122" r="3"/><g transform="translate(65 82)"><rect class="node red" width="160" height="80" rx="12"/><text x="80" y="32" text-anchor="middle">Red Swarm</text><text class="sub" id="top-red" x="80" y="52" text-anchor="middle">armed</text></g><g transform="translate(275 82)"><rect class="node" width="210" height="80" rx="12"/><text x="105" y="32" text-anchor="middle">Target App</text><text class="sub" id="top-target" x="105" y="52" text-anchor="middle">nominal</text></g><g transform="translate(535 82)"><rect class="node blue" width="160" height="80" rx="12"/><text x="80" y="32" text-anchor="middle">Blue Swarm</text><text class="sub" id="top-blue" x="80" y="52" text-anchor="middle">healing</text></g><g transform="translate(300 8)"><rect class="node vault" width="160" height="54" rx="10"/><text x="80" y="23" text-anchor="middle">Cryptographic Vault</text><text class="sub" id="top-vault" x="80" y="41" text-anchor="middle">sealed</text></g></svg></article>
@@ -360,11 +363,36 @@ function render(state){
  const stateUrl=window.location.pathname.replace(/\/?(?:\?.*)?$/,'/state');
  let dashboardState=INITIAL_STATE;
  async function refresh(){try{const response=await fetch(stateUrl,{headers:{Accept:'application/json'},cache:'no-store'});if(!response.ok)throw new Error(`HTTP ${response.status}`);dashboardState=await response.json();render(dashboardState);byId('connection').textContent='connected'}catch(error){byId('connection').textContent='retrying'}}
- function handleEvent(message){
-  const payload=message&&message.data?message.data:message;const state=payload&&payload.state;
-  if(state){dashboardState=state;render(state)}
-  byId('connection').textContent='live';
- }
+  function handleEvent(message){
+   const payload=message&&message.data?message.data:message;const state=payload&&payload.state;const type=payload&&payload.type;const data=(payload&&payload.data)||{};
+   if(state){dashboardState=state;render(state)}
+   if(type==='attack_started'||type==='failure_detected'){
+    const indicator=byId('attack-indicator');indicator.textContent='ENGAGED';indicator.className='live-value alert pulse';
+    byId('attack-target').textContent=`target ${text(data.target_endpoint||data.endpoint||dashboardState.target_endpoint,'endpoint unknown')}`;
+    byId('top-red').textContent='engaged';
+   } else if(type==='attack_finished'){
+    byId('attack-indicator').textContent='ATTACK COMPLETE';byId('attack-indicator').className='live-value';
+   } else if(type==='triage_done'){
+    const file=text(data.culprit_file||data.file||data.target_file,'culprit pending');const line=text(data.culprit_line||data.line,'—');
+    byId('triage-culprit').textContent=`${file}:${line}`;
+    byId('triage-details').textContent=`line ${line} · token ${text(data.exception_type||data.exception_token,'—')} · class ${text(data.bug_class,'—')}`;
+   } else if(type==='patch_applied'){
+    if(data.diff)byId('diff').innerHTML=renderDiff(data.diff);
+    byId('diff-status').textContent='APPLIED';byId('diff-status').className='pill created';
+   } else if(type==='escalation_started'||type==='escalation_passed'||type==='escalation_failed'){
+    const tested=numeric(data.mutations_tested||data.completed||data.current,0);const total=Math.max(3,numeric(data.mutations_total,3));
+    const suffix=type==='escalation_passed'?' SURVIVED':type==='escalation_failed'?' FAILED':'';
+    byId('mutation-progress').textContent=`${tested}/${total}${suffix}`;
+    byId('mutation-progress').className=`live-value ${type==='escalation_passed'?'success':type==='escalation_failed'?'alert':''}`;
+   } else if(type==='git_branch_created'||type==='git_branch_pushed'){
+    const branch=text(data.branch,'heal/pending');const commit=text(data.commit,'unknown').slice(0,8);
+    byId('active-branch').textContent=`${branch} · ${commit}`;
+   } else if(type==='run_complete'){
+    byId('status').textContent='100/100 SYSTEM VACCINATED';byId('attack-indicator').textContent='MISSION COMPLETE';byId('attack-indicator').className='live-value success';
+    byId('top-red').textContent='stand down';byId('top-target').textContent='vaccinated';
+   }
+   byId('connection').textContent='live';
+  }
  const stream=new EventSource('/api/v1/events/stream');
  stream.onmessage=(message)=>{try{handleEvent({data:JSON.parse(message.data)})}catch(error){byId('connection').textContent='retrying'}};
  ['attack_started','attack_finished','failure_detected','triage_done','patch_proposed','patch_applied','verify_started','verify_passed','verify_failed','rolled_back','memory_hit','escalation_started','escalation_passed','escalation_failed','git_branch_created','git_branch_failed','git_branch_pushed','git_branch_push_failed','pr_created','pr_failed','run_complete'].forEach((eventType)=>stream.addEventListener(eventType,(message)=>{try{handleEvent({data:JSON.parse(message.data)})}catch(error){byId('connection').textContent='retrying'}}));
