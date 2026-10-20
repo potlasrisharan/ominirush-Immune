@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 
 import pytest
 
 from omniimmune.events import Event, EventBus, EventType
-from omniimmune.memory import ImmuneMemory
+from omniimmune.memory import ImmuneMemory, UntrustedImmuneMemoryError
 from omniimmune.models import (
     AttackDNA,
     AttackType,
@@ -127,8 +128,23 @@ async def test_event_bus_awaits_async_callbacks_in_order() -> None:
 def test_immune_memory_roundtrip_corrupt_missing_count_and_clear(tmp_path) -> None:
     memory = ImmuneMemory(root=tmp_path / "memory")
     sig_id = IncidentSignature.make_sig_id(BugClass.STARVATION, "/work", "TimeoutError")
-    memory.save_patch(sig_id, {"verified": True})
-    assert memory.get_patch(sig_id) == {"verified": True}
+    source = "def work():\n    return 1\n"
+    base_sha256 = hashlib.sha256(b"def work():\n    return 0\n").hexdigest()
+    memory.save_patch(
+        sig_id,
+        {
+            "strategy": "cached",
+            "diff": "- return 0\n+ return 1\n",
+            "modified_source": source,
+            "base_file_sha256": base_sha256,
+            "verified": True,
+        },
+    )
+    cached = memory.get_patch(sig_id)
+    assert cached is not None
+    assert cached["modified_source"] == source
+    assert cached["base_file_sha256"] == base_sha256
+    assert isinstance(cached["signature"], str)
     assert memory.get_vaccinated_count() == 1
 
     (memory.root / f"{sig_id}.json").write_text("{not json", encoding="utf-8")
@@ -136,6 +152,67 @@ def test_immune_memory_roundtrip_corrupt_missing_count_and_clear(tmp_path) -> No
     assert memory.get_patch("missing") is None
     assert memory.clear() == 1
     assert memory.get_vaccinated_count() == 0
+
+
+def test_immune_memory_valid_signature_and_base_sha_check(tmp_path) -> None:
+    memory = ImmuneMemory(tmp_path / "memory")
+    sig_id = "sig-valid"
+    base_sha256 = hashlib.sha256(b"original").hexdigest()
+    payload = {
+        "strategy": "input_guard",
+        "base_file_sha256": base_sha256,
+        "modified_source": "hardened",
+    }
+    path = memory.save_patch(sig_id, payload)
+    stored = json.loads(path.read_text(encoding="utf-8"))
+
+    assert memory.get_patch(sig_id, expected_base_file_sha256=base_sha256) == stored
+    assert stored["signature"] == memory._sign(
+        sig_id, payload["strategy"], base_sha256, payload["modified_source"]
+    )
+
+    with pytest.raises(UntrustedImmuneMemoryError):
+        memory.get_patch(sig_id, expected_base_file_sha256=hashlib.sha256(b"other").hexdigest())
+
+
+def test_immune_memory_rejects_modified_source_tampering(tmp_path) -> None:
+    memory = ImmuneMemory(tmp_path / "memory")
+    sig_id = "sig-tampered"
+    memory.save_patch(
+        sig_id,
+        {
+            "strategy": "input_guard",
+            "base_file_sha256": hashlib.sha256(b"original").hexdigest(),
+            "modified_source": "hardened",
+        },
+    )
+    path = memory.root / f"{sig_id}.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["modified_source"] = "malicious"
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    with pytest.raises(UntrustedImmuneMemoryError):
+        memory.get_patch(sig_id)
+
+
+def test_immune_memory_rejects_tampered_base_sha256(tmp_path) -> None:
+    memory = ImmuneMemory(tmp_path / "memory")
+    sig_id = "sig-base-tampered"
+    memory.save_patch(
+        sig_id,
+        {
+            "strategy": "input_guard",
+            "base_file_sha256": hashlib.sha256(b"original").hexdigest(),
+            "modified_source": "hardened",
+        },
+    )
+    path = memory.root / f"{sig_id}.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["base_file_sha256"] = hashlib.sha256(b"different").hexdigest()
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    with pytest.raises(UntrustedImmuneMemoryError):
+        memory.get_patch(sig_id)
 
 
 def test_immune_memory_rejects_unsafe_signature_ids(tmp_path) -> None:

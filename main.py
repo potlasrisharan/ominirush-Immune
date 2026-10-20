@@ -5,9 +5,20 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 
-from omniimmune.arbiter import Arbiter
-from omniimmune.healer.git_branch import GitBranchEngine
+DEFAULT_DASHBOARD_PORT = 8080
+
+
+def _port_number(value: str) -> int:
+    """Parse a TCP port for the dashboard CLI option."""
+    try:
+        port = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("port must be an integer") from exc
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError("port must be between 1 and 65535")
+    return port
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -18,10 +29,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--fresh", action="store_true", help="clear cached immune patches before running")
     parser.add_argument("--no-ui", action="store_true", help="disable Rich HUD output")
     parser.add_argument("--json", action="store_true", help="print the final ImmunitySummary as JSON")
+    parser.add_argument(
+        "--serve-dashboard",
+        nargs="?",
+        const=DEFAULT_DASHBOARD_PORT,
+        default=None,
+        type=_port_number,
+        metavar="PORT",
+        help=f"serve the browser dashboard without running chaos (default port: {DEFAULT_DASHBOARD_PORT})",
+    )
     return parser.parse_args(argv)
 
 
 async def async_main(args: argparse.Namespace) -> int:
+    from omniimmune.arbiter import Arbiter
+    from omniimmune.healer.git_branch import GitBranchEngine
+
     if args.fresh:
         GitBranchEngine().cleanup_heal_branches()
     arbiter = Arbiter(
@@ -42,7 +65,32 @@ async def async_main(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     try:
-        return asyncio.run(async_main(parse_args(argv)))
+        args = parse_args(argv)
+        if args.serve_dashboard is not None:
+            from omniimmune.ui.web import DashboardStore, create_dashboard_app
+            import uvicorn
+
+            state_path = Path(
+                os.getenv(
+                    "OMNI_DASHBOARD_STATE_PATH",
+                    str(Path(__file__).resolve().parent / "artifacts" / "dashboard_state.json"),
+                )
+            )
+            store = DashboardStore()
+            try:
+                payload = json.loads(state_path.read_text(encoding="utf-8"))
+            except (FileNotFoundError, OSError, json.JSONDecodeError):
+                payload = None
+            if isinstance(payload, dict):
+                store.replace(payload)
+            uvicorn.run(
+                create_dashboard_app(store),
+                host="127.0.0.1",
+                port=args.serve_dashboard,
+                log_level="info",
+            )
+            return 0
+        return asyncio.run(async_main(args))
     except KeyboardInterrupt:
         return 130
     except Exception as exc:

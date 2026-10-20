@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -17,7 +19,7 @@ from omniimmune.events import EventBus, EventType
 from omniimmune.healer.git_branch import GitBranchEngine, GitBranchError
 from omniimmune.healer.patcher import PatchLadder
 from omniimmune.healer.triage import TriageEngine
-from omniimmune.memory import ImmuneMemory
+from omniimmune.memory import ImmuneMemory, UntrustedImmuneMemoryError
 from omniimmune.models import (
     AttackDNA,
     AttackType,
@@ -168,6 +170,39 @@ class Arbiter:
             await asyncio.gather(*(process.wait() for process in self._processes), return_exceptions=True)
         self._processes.clear()
 
+    def _write_dashboard_state(self, summary: ImmunitySummary) -> None:
+        """Persist the latest run so the standalone dashboard can reopen it."""
+        destination = Path(
+            os.getenv(
+                "OMNI_DASHBOARD_STATE_PATH",
+                str(self.root / "artifacts" / "dashboard_state.json"),
+            )
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=destination.parent,
+                prefix=f".{destination.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary_path = temporary.name
+                json.dump(
+                    summary.model_dump(mode="json"),
+                    temporary,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.replace(temporary_path, destination)
+        finally:
+            if temporary_path is not None and os.path.exists(temporary_path):
+                os.unlink(temporary_path)
+
     @staticmethod
     def _signature_for_result(
         vector: AttackType, dna: AttackDNA, result: dict, triage: TriageEngine
@@ -246,7 +281,17 @@ class Arbiter:
                 await self.event_bus.publish(EventType.ESCALATION_FAILED, event_data)
             return verdict
 
-        cached = self.memory.get_patch(signature.sig_id)
+        pristine_sha256 = hashlib.sha256(pristine.encode("utf-8")).hexdigest()
+        try:
+            cached = self.memory.get_patch(
+                signature.sig_id,
+                expected_base_file_sha256=pristine_sha256,
+            )
+        except UntrustedImmuneMemoryError as exc:
+            # A corrupt or stale cache entry must never become executable
+            # source.  Reject it and continue through the normal patch ladder.
+            logger.warning("Ignoring untrusted immune memory for %s: %s", signature.sig_id, exc)
+            cached = None
         if cached:
             modified_source = cached.get("modified_source")
             if modified_source:
@@ -258,7 +303,7 @@ class Arbiter:
                 diff=str(cached.get("diff", "")),
                 applied=False,
                 from_memory=True,
-                base_file_sha256=hashlib.sha256(pristine.encode("utf-8")).hexdigest(),
+                base_file_sha256=pristine_sha256,
             )
             await self.event_bus.publish(EventType.MEMORY_HIT, {"sig_id": signature.sig_id, "strategy": patch.strategy})
             await self._restart_target()
@@ -322,7 +367,21 @@ class Arbiter:
                     if hud:
                         hud.update_attack(vector=vector.value.upper(), status="failure detected" if result["is_failure"] else "survived", payload_preview=str(dna.payload or dna.raw_body or "—")[:80], requests_per_sec=(dna.request_count / max(result.get("elapsed_ms", 1) / 1000, 0.001)))
                     signature = self._signature_for_result(vector, dna, result, triage)
-                    cached = self.memory.get_patch(signature.sig_id)
+                    current_base_sha256 = hashlib.sha256(
+                        self.target_file.read_bytes()
+                    ).hexdigest()
+                    try:
+                        cached = self.memory.get_patch(
+                            signature.sig_id,
+                            expected_base_file_sha256=current_base_sha256,
+                        )
+                    except UntrustedImmuneMemoryError as exc:
+                        logger.warning(
+                            "Ignoring untrusted immune memory for %s: %s",
+                            signature.sig_id,
+                            exc,
+                        )
+                        cached = None
                     if result["is_failure"]:
                         signature = await self._triage(vector, dna, result, triage)
                     elif cached is None:
@@ -346,7 +405,16 @@ class Arbiter:
                             patch_dir = self.root / "artifacts" / "patches"
                             patch_dir.mkdir(parents=True, exist_ok=True)
                             (patch_dir / f"{signature.sig_id}.diff").write_text(patch.diff, encoding="utf-8")
-                            self.memory.save_patch(signature.sig_id, {"strategy": patch.strategy, "diff": patch.diff, "modified_source": self.target_file.read_text(encoding="utf-8"), "verified": True})
+                    self.memory.save_patch(
+                        signature.sig_id,
+                        {
+                            "strategy": patch.strategy,
+                            "diff": patch.diff,
+                            "modified_source": self.target_file.read_text(encoding="utf-8"),
+                            "base_file_sha256": patch.base_file_sha256,
+                            "verified": True,
+                        },
+                    )
                     regression_passed = regression_passed and verdict.regression_passed
                     before = self._stats_from_result(result)
                     self._incidents.append({
@@ -441,6 +509,7 @@ class Arbiter:
                         "pr_template_paths": pr_template_paths,
                     }
                 )
+                self._write_dashboard_state(summary)
                 await self.event_bus.publish(EventType.RUN_COMPLETE, summary.model_dump(mode="json"))
                 if hud:
                     hud.render_summary(summary)

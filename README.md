@@ -34,9 +34,25 @@ For a local-only run, the Arbiter starts and stops Uvicorn subprocesses itself:
 .venv/bin/python main.py --mode local --no-ui --json
 ```
 
+To inspect the live mission-control dashboard in a browser without starting the
+chaos loop, run the standalone dashboard server (default port `8080`) and open
+`http://127.0.0.1:8080/dashboard`:
+
+```bash
+.venv/bin/python main.py --serve-dashboard
+# or choose a port
+.venv/bin/python main.py --serve-dashboard 9090
+```
+
 The run writes `INCIDENT_REPORT.md`, DNA under `artifacts/dna/`, patch files
 under `artifacts/patches/`, and cached signatures under `artifacts/memory/`.
 Runtime artifacts are ignored by git.
+
+Immune-memory entries are HMAC-SHA256 signed over their signature ID, patch
+strategy, base-file SHA-256, and modified source. Set `OMNI_SIGNING_KEY` to a
+random secret in production; local demos use the built-in development fallback.
+The latest summary is also written to `artifacts/dashboard_state.json`, which
+the dashboard server loads when it starts.
 
 ## Architecture
 
@@ -138,6 +154,9 @@ reported as a successful commit.
 --fresh               Clear cached immune signatures before running
 --no-ui               Stream no HUD output; useful in CI
 --json                Emit the final ImmunitySummary as JSON
+--serve-dashboard [PORT]
+                      Serve the browser dashboard without running chaos
+                      (default port when supplied without a value: 8080)
 ```
 
 ## Docker notes
