@@ -5,6 +5,8 @@
 __pycache__
 *.py[cod]
 .DS_Store
+.env
+.env.*
 artifacts
 INCIDENT_REPORT.md
 .opencode/omnirush/inbox

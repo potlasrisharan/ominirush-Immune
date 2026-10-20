@@ -145,6 +145,24 @@ python -m pip install --requirement requirements.lock
 cp .env.example .env  # optional; never commit secrets
 ```
 
+### Reproducible build, test, and run commands
+
+From the repository root, these are the canonical commands:
+
+```bash
+# Build the application image
+docker build -t omniimmune:local .
+
+# Run the complete isolated stack
+docker compose up --build
+
+# Run the offline test suite (after the local environment is installed)
+make test
+```
+
+The image uses Python 3.12.8 and installs the fully pinned `requirements.lock`.
+The Compose command starts the upstream mock, target service, and Arbiter together.
+
 ### Run the isolated Docker mission
 
 This starts the upstream mock, vulnerable target, and Arbiter on a private Compose network:
