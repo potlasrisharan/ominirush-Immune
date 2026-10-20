@@ -91,10 +91,10 @@ SCENE_DEFS = [
         "key": "summary",
         "tag": "MISSION CONTROL",
         "title": "100/100 Immunity Score · Docker-Reproducible Resilience.",
-        "voice": "OmniImmune transforms fragile code into self-healing infrastructure. With 81 tests passing, zero-trust cryptographic memory, and single-command Docker reproducibility, it is built for real-world resilience. Explore the project on GitHub.",
+        "voice": "OmniImmune transforms fragile code into self-healing infrastructure. With 95 tests passing, zero-trust cryptographic memory, and single-command Docker reproducibility, it is built for real-world resilience. Explore the project on GitHub.",
         "subtitles": [
             (0.0, 5.0, "OmniImmune transforms fragile code into self-healing infrastructure.", ["OmniImmune", "self-healing"]),
-            (5.0, 11.0, "81/81 tests passing · Zero-trust memory · Single-command Docker demo.", ["81/81", "tests", "Zero-trust", "Docker"]),
+            (5.0, 11.0, "95/95 tests passing · Zero-trust memory · Single-command Docker demo.", ["95/95", "tests", "Zero-trust", "Docker"]),
             (11.0, 17.0, "Explore OmniImmune on GitHub: Systems, Infrastructure & Cybersecurity.", ["GitHub", "Systems", "Infrastructure", "Cybersecurity"]),
         ],
     },
@@ -212,6 +212,9 @@ def render_server_scene(frame: int, total_frames: int, scene_data: dict) -> Imag
     for i in range(visible_count):
         text, col = terminal_lines[i]
         draw.text((tx1 + 30, cur_y), text, font=FONTS["code"], fill=col)
+        if i == visible_count - 1 and (frame // 10) % 2 == 0:
+            tw = draw.textlength(text, font=FONTS["code"])
+            draw.text((tx1 + 30 + tw + 6, cur_y), "▋", font=FONTS["code"], fill=GREEN)
         cur_y += 38
 
     draw_subtitles(draw, frame / FPS, scene_data["subtitles"])
@@ -296,6 +299,16 @@ def render_chaos_scene(frame: int, total_frames: int, scene_data: dict) -> Image
     rx1, ry1, rx2, ry2 = 1130, 220, 1840, 880
     draw.rounded_rectangle((rx1, ry1, rx2, ry2), radius=16, fill=PANEL_BG, outline=BORDER, width=2)
     draw.text((rx1 + 40, ry1 + 30), "CHAOS TELEMETRY & VULNERABILITY RADAR", font=FONTS["h3"], fill=WHITE)
+
+    # Dynamic sweeping radar HUD in top right
+    cx, cy = rx2 - 75, ry1 + 50
+    draw.ellipse((cx - 36, cy - 36, cx + 36, cy + 36), outline=(32, 65, 85), width=2)
+    draw.ellipse((cx - 18, cy - 18, cx + 18, cy + 18), outline=(24, 50, 70), width=1)
+    draw.line((cx - 36, cy, cx + 36, cy), fill=(24, 50, 70), width=1)
+    draw.line((cx, cy - 36, cx, cy + 36), fill=(24, 50, 70), width=1)
+    radar_angle = (frame * 0.12) % (2 * math.pi)
+    draw.line((cx, cy, cx + int(34 * math.cos(radar_angle)), cy + int(34 * math.sin(radar_angle))), fill=CYAN, width=2)
+    draw.ellipse((cx - 4, cy - 4, cx + 4, cy + 4), fill=CRIMSON)
 
     vectors = [
         ("FuzzNet Boundary Panic", 1.0, CRIMSON, "Ledger crash (500)"),
@@ -446,7 +459,7 @@ def render_summary_scene(frame: int, total_frames: int, scene_data: dict) -> Ima
 
     # Right Side: Verified Metric Badges
     cards = [
-        ("81 / 81", "OFFLINE SUITE PASSING", "tests/ unit & integration", GREEN),
+        ("95 / 95", "OFFLINE SUITE PASSING", "tests/ unit & integration", GREEN),
         ("3 / 3", "INCIDENTS REPAIRED", "Panic, Deadlock & Timeout", CYAN),
         ("0", "REGRESSIONS DETECTED", "Golden endpoints 100% intact", GREEN),
         ("O(1)", "IMMUNE MEMORY HIT", "Zero-trust HMAC signed vault", AMBER),
@@ -516,17 +529,46 @@ def make_ambient_soundtrack(work: Path, total_duration: float) -> Path:
     return synth_path
 
 async def main():
-    print("=== Starting Pro Demo Video Generation (1080p, Neural Voiceover) ===")
+    import argparse
+    parser = argparse.ArgumentParser(description="Render 1080p Full HD OmniImmune demo video")
+    parser.add_argument("--voiceover", help="Path to custom ElevenLabs voiceover audio file (MP3 or WAV)")
+    args = parser.parse_args()
+
+    print("=== Starting Pro Demo Video Generation (1080p, Enhanced Visuals) ===")
     with tempfile.TemporaryDirectory(prefix="omniimmune-pro-") as temp_dir:
         work = Path(temp_dir)
-        voice_chunks = await generate_voiceovers(work)
         
-        # Calculate synchronized frames per scene
-        # Total video should be exactly 120s
-        total_audio = sum(dur for _, dur in voice_chunks)
-        # Pad each scene slightly so visuals transition smoothly after voice ends
-        padding_per_scene = (120.0 - total_audio) / len(voice_chunks)
-        scene_durations = [dur + padding_per_scene for _, dur in voice_chunks]
+        full_voice = work / "voice_full.wav"
+        if args.voiceover and Path(args.voiceover).exists():
+            custom_voice = Path(args.voiceover).resolve()
+            print(f"Using custom ElevenLabs voiceover: {custom_voice}")
+            subprocess.run([
+                "ffmpeg", "-y", "-i", str(custom_voice),
+                "-ar", "44100", "-ac", "2", str(full_voice)
+            ], check=True, cwd=ROOT)
+            dur_cmd = [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", str(full_voice)
+            ]
+            total_audio = float(subprocess.check_output(dur_cmd).decode().strip())
+            # Distribute scene durations based on standard proportions
+            proportions = [20.5, 18.7, 24.5, 23.9, 16.7, 16.7]
+            prop_sum = sum(proportions)
+            scene_durations = [(p / prop_sum) * 120.0 for p in proportions]
+        else:
+            voice_chunks = await generate_voiceovers(work)
+            total_audio = sum(dur for _, dur in voice_chunks)
+            padding_per_scene = (120.0 - total_audio) / len(voice_chunks)
+            scene_durations = [dur + padding_per_scene for _, dur in voice_chunks]
+
+            concat_file = work / "voice_concat.txt"
+            with open(concat_file, "w") as f:
+                for p, _ in voice_chunks:
+                    f.write(f"file '{p.resolve()}'\n")
+            subprocess.run([
+                "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
+                "-ar", "44100", "-ac", "2", str(full_voice)
+            ], check=True, cwd=ROOT)
 
         frames_dir = work / "frames"
         frames_dir.mkdir()
@@ -548,17 +590,6 @@ async def main():
             "-i", str(frames_dir / "frame_%05d.png"),
             "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p", "-r", str(FPS),
             str(silent_video)
-        ], check=True, cwd=ROOT)
-
-        # Concatenate audio chunks
-        concat_file = work / "voice_concat.txt"
-        with open(concat_file, "w") as f:
-            for p, _ in voice_chunks:
-                f.write(f"file '{p.resolve()}'\n")
-        full_voice = work / "voice_full.wav"
-        subprocess.run([
-            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
-            "-ar", "44100", "-ac", "2", str(full_voice)
         ], check=True, cwd=ROOT)
 
         synth_music = make_ambient_soundtrack(work, 120.0)
