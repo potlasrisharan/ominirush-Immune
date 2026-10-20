@@ -1,201 +1,243 @@
-# OmniResilience · Phase 4
+# OmniImmune (OmniResilience)
+
+> **Autonomous Chaos Engineering & Self-Healing Agent Swarm**  
+> *"Break it. Heal it. Prove it."*
 
 [![CI Status](https://github.com/potlasrisharan/ominirush-Immune/actions/workflows/ci.yml/badge.svg)](https://github.com/potlasrisharan/ominirush-Immune/actions/workflows/ci.yml)
-[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
-[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![Tests](https://img.shields.io/badge/tests-51%2F51%20passing-brightgreen.svg)](https://github.com/potlasrisharan/ominirush-Immune/actions/workflows/ci.yml)
+[![Python 3.12](https://img.shields.io/badge/python-3.12.8-blue.svg)](https://www.python.org/downloads/release/python-3120/)
+[![Docker Ready](https://img.shields.io/badge/docker-compose%20v2-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Tests Passing](https://img.shields.io/badge/tests-92%2F92%20passing-brightgreen.svg)](https://github.com/potlasrisharan/ominirush-Immune/actions/workflows/ci.yml)
+[![Immunity Score](https://img.shields.io/badge/immunity%20score-100%2F100-emerald.svg)](INCIDENT_REPORT.md)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-OmniResilience is a deterministic closed-loop resilience demo. The Red Swarm
-breaks a deliberately vulnerable FastAPI target, the Blue Swarm triages the
-failure and applies a LibCST patch, and the Arbiter replays the exact
-`AttackDNA` before it commits the patch to Immune Memory.
+OmniImmune is a deterministic, closed-loop resilience engineering platform that bridges the gap between **Chaos Engineering (Red Team)** and **Automated Program Repair (Blue Team)** inside an isolated sandbox. 
 
-## Quickstart
+The Red Swarm launches coordinated multi-vector chaos against a target service until it crashes or breaches SLA limits. The Blue Swarm ingests the failure, pinpoints the root cause via AST and stack trace triage, applies minimal syntax-preserving code repairs via Concrete Syntax Trees (LibCST) or an autonomous LLM fallback, proves the fix through replay verification and adversarial escalation, and commits the hardened code to an isolated Git branch and cryptographically signed Immune Memory.
 
-Requirements: Python 3.12.8 (pinned in `.python-version`) and Docker Engine
-with Compose v2.
+---
 
-```bash
-python3.12 -m venv .venv
-.venv/bin/python -m pip install -r requirements.lock
+## 🏗️ Architecture
 
-# Full sandbox demo: upstream → target → Arbiter
-docker compose up --build
+```mermaid
+flowchart TD
+    subgraph RedSwarm["🔴 Red Swarm (Chaos Team)"]
+        Fuzz["FuzzNet (OpenAPI Boundary Fuzzer)"]
+        Storm["StormLoad (Concurrency Stress)"]
+        Latency["LatencyDrift (Async Proxy Drops)"]
+        Leak["MemoryStressAgent (Resource Exhaustion)"]
+    end
 
-# Offline unit and integration suite
-make test
-# equivalent: .venv/bin/pytest -v tests/
+    subgraph Sandbox["📦 Target Service Sandbox"]
+        Target["FastAPI Microservice (Target)"]
+        Upstream["Upstream Mock Service"]
+    end
+
+    subgraph BlueSwarm["🔵 Blue Swarm (Healing Team)"]
+        Triage["Triage Engine (AST & Traceback Parser)"]
+        CST["PatchLadder (LibCST Semantic Transformer)"]
+        LLMFallback["LLM Fallback Patcher (Unified Diff Synthesizer)"]
+    end
+
+    subgraph Proof["🛡️ Verification & Audit Core"]
+        Verifier["Replay Verifier (Exact AttackDNA Replay)"]
+        Regression["Golden Path Regression Check"]
+        Escalation["Adversarial Escalation (3 Mutations)"]
+        GitBranch["Auto-Branching Git Engine (heal/sig-*)"]
+        Memory["Immune Memory (HMAC-SHA256 Signed)"]
+    end
+
+    subgraph Ops["📊 Mission Control & Reporting"]
+        SSE["Real-Time SSE Stream (/api/v1/events/stream)"]
+        Dashboard["Browser Dashboard (/dashboard)"]
+        Prometheus["Prometheus Metrics (metrics.prom)"]
+        PR["Automated PR Publisher (--push-pr)"]
+    end
+
+    RedSwarm -->|Injects Chaos & AttackDNA| Sandbox
+    Sandbox -->|Crash / Hang / SLA Breach| Triage
+    Triage -->|Signature Locked| CST
+    CST -->|Deterministic LibCST Patch| Verifier
+    CST -.->|Fallback on Unknown Bug| LLMFallback
+    LLMFallback -->|Synthesized Diff| Verifier
+    Verifier -->|Target Restart & Attack Replay| Sandbox
+    Verifier -->|Verify Survives| Regression
+    Regression -->|Golden Endpoints Green| Escalation
+    Escalation -->|3/3 Mutations Survived| GitBranch
+    Escalation -->|Vaccinated Signature| Memory
+    Proof -->|Event Stream| SSE
+    SSE --> Dashboard
+    Proof --> PR
+    Proof --> Prometheus
 ```
 
-For a local-only run, the Arbiter starts and stops Uvicorn subprocesses itself:
+---
+
+## ⚡ The 4-Phase Closed Loop
+
+1. **Phase 1: Baseline Verification**
+   - The engine validates golden endpoints (`/health`, `/api/v1/catalog`, `/api/v1/status`) to establish baseline health, response schemas, and clean latency boundaries.
+2. **Phase 2: Coordinated Chaos Waves (Break It)**
+   - **FuzzNet** (`AttackType.FUZZ`): Discovers endpoints via `GET /openapi.json` and synthesizes schema-aware payloads (boundary numbers, Unicode, nulls) targeting `/api/v1/order` to trigger unhandled `ValueError` or `ZeroDivisionError` panics.
+   - **StormLoad** (`AttackType.STORM`): Floods `/api/v1/inventory/reserve` with asynchronous request bursts, exposing blocking `threading.Lock` and `time.sleep` calls that starve the event loop (p99 latency > 1,500ms).
+   - **LatencyDrift** (`AttackType.LATENCY`): Emulates upstream network packet drops and latency spikes against `/api/v1/payment/verify` exposing uncapped HTTP client connections.
+   - **MemoryLeak** (`AttackType.LEAK`): Stresses unbounded accumulator endpoints (`/api/v1/cache/item`) and monitors container memory cgroups / RSS inflation.
+   - Every incident is fingerprinted into cryptographic `AttackDNA` (SHA-256 identity, payload, headers, timing).
+3. **Phase 3: AST Triage & Semantic Code Repair (Heal It)**
+   - **TriageEngine**: Parses stderr tracebacks and inspects AST structures to pin the exact culprit file, function, and line number without exposing host environment paths.
+   - **PatchLadder (LibCST)**: Applies the smallest AST transformation ladder:
+     - *Panic*: Inserts schema boundary guards returning structured `400 Bad Request` JSON responses.
+     - *Starvation*: Swaps blocking locks and sleeps for non-blocking `asyncio.Lock` and `await asyncio.sleep`.
+     - *Timeout*: Adds explicit 1.5s timeout boundaries and catches `httpx.TimeoutException` returning `504 Gateway Timeout`.
+     - *Resource Exhaustion*: Converts unbounded list accumulators into bounded `collections.deque(maxlen=1000)`.
+   - **LLM Fallback Patcher**: If deterministic CST templates do not match or fail, invokes an agentic synthesizer (`OPENAI_API_KEY`, `GEMINI_API_KEY`, or `OMNI_LLM_KEY`) to generate, validate, and compile a minimal unified diff.
+4. **Phase 4: Verification Trial, Escalation & Git Audit (Prove It)**
+   - The Arbiter reboots the target container or Uvicorn worker.
+   - **Exact DNA Replay**: Re-executes the exact failing attack wave. The target must survive and return a controlled status code.
+   - **Golden Regression**: Golden paths are verified to ensure zero collateral regressions.
+   - **Adversarial Escalation**: Generates 3 independent deterministic mutations (numeric boundaries, Unicode injection, type confusion) to certify generalized immunity without overfitting.
+   - **Isolated Git Branching**: Commits the verified repair to an isolated branch `heal/<sig_id>` using a temporary Git index without dirtying the current branch or uncommitted work.
+   - **Immune Memory**: Persists verified repairs signed with HMAC-SHA256. Subsequent runs recognize the incident and vaccinate in under 1ms (`MEMORY_HIT`).
+
+---
+
+## 🚀 Quickstart
+
+### Prerequisites
+- Python 3.12.8 (pinned in `.python-version`)
+- Docker Engine & Docker Compose v2
+
+### 1. Installation
 
 ```bash
-.venv/bin/python main.py --mode local --fresh --no-ui
+git clone https://github.com/potlasrisharan/ominirush-Immune.git
+cd ominirush-Immune
+
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.lock
+```
+
+### 2. Run the Full Sandbox Demo (Docker Compose)
+
+Starts the upstream service, vulnerable target container, and Arbiter supervisor in an isolated network sandbox:
+
+```bash
+docker compose up --build
+```
+
+### 3. Run Offline Local Closed-Loop
+
+Runs the closed loop locally where Arbiter manages its own Uvicorn subprocesses:
+
+```bash
+# Run local closed-loop demo with live terminal HUD
+make demo
+# or: .venv/bin/python main.py --mode local --fresh
+
+# Run silently and output structured JSON summary
 .venv/bin/python main.py --mode local --no-ui --json
 ```
 
-To inspect the live mission-control dashboard in a browser without starting the
-chaos loop, run the standalone dashboard server (default port `8080`) and open
-`http://127.0.0.1:8080/dashboard`:
+### 4. Launch Live Mission Control Dashboard
 
 ```bash
-.venv/bin/python main.py --serve-dashboard
-# or choose a port
-.venv/bin/python main.py --serve-dashboard 9090
+# Serves the standalone web dashboard at http://127.0.0.1:8080/dashboard
+make dashboard
+# or custom port: .venv/bin/python main.py --serve-dashboard 9090
 ```
 
-The run writes `INCIDENT_REPORT.md`, the standalone dashboard at
-`artifacts/report.html`, Prometheus gauges at `artifacts/metrics.prom`, DNA
-under `artifacts/dna/`, patch files under `artifacts/patches/`, and cached
-signatures under `artifacts/memory/`. Report culprit locations and unified diff
-headers are repository-relative so host checkout paths are never emitted.
-Runtime artifacts are ignored by git.
+---
 
-Immune-memory entries are HMAC-SHA256 signed over their signature ID, patch
-strategy, base-file SHA-256, and modified source. Set `OMNI_SIGNING_KEY` to a
-random secret in production; local demos use the built-in development fallback.
-The latest summary is also written to `artifacts/dashboard_state.json`, which
-the dashboard server loads when it starts.
-
-## Architecture
+## 💻 CLI Reference
 
 ```text
-┌───────────────┐   AttackDNA   ┌──────────────┐   failure   ┌─────────────┐
-│ Red Swarm     │ ─────────────▶ │ Target API   │ ─────────▶ │ Arbiter     │
-│ Fuzz/Storm/   │                │ FastAPI      │             │ triage      │
-│ Latency       │ ◀───────────── │ + Upstream   │ ◀────────── │ patch/restart│
-└───────────────┘    replay     └──────────────┘   proof     └──────┬──────┘
-                                                                    │
-                                                   ┌────────────────▼───────┐
-                                                   │ Immune Memory + Report  │
-                                                   └─────────────────────────┘
+Usage: main.py [OPTIONS]
+
+Options:
+  --version                 Show engine version and exit.
+  --mode [docker|local]     Execution mode (default: docker).
+  --seed INTEGER            Deterministic chaos random seed (default: 1337).
+  --fresh                   Clear cached immune memory and repair branches before running.
+  --no-ui                   Disable the Rich terminal HUD (recommended for CI pipelines).
+  --json                    Emit the final ImmunitySummary as structured JSON to stdout.
+  --push-pr                 Push verified heal branches to remote and create PRs via gh CLI.
+  --serve-dashboard [PORT]  Serve the browser dashboard without running chaos (default port: 8080).
 ```
 
-```mermaid
-flowchart LR
-  R[Red Swarm] --> T[Target Container]
-  T -->|crash or SLA breach| A[Arbiter]
-  A --> B[Blue Swarm: Triage + LibCST]
-  B --> T
-  A --> V[Replay Verifier]
-  V -->|golden regressions| A
-  A --> M[(Immune Memory)]
-  A --> P[INCIDENT_REPORT.md]
+---
+
+## 🔬 Core Engineering Innovations
+
+### 1. Zero-Trust Signed Immune Memory
+- Cached patches in `artifacts/memory/<sig_id>.json` are signed with HMAC-SHA256 over `(sig_id, strategy, base_file_sha256, modified_source)`.
+- Prevents cache poisoning or stale code injection: any manual or unauthorized modification of cached source raises `UntrustedImmuneMemoryError` and falls back to clean triage.
+
+### 2. Isolated Auto-Branching Git Engine
+- Verified repairs are committed directly to `heal/<sig_id>` branches.
+- Uses an isolated temporary Git index: your working tree, active branch, staged files, and untracked changes are never touched or dirtied.
+- Every commit includes cryptographic provenance: triggering DNA hash, base commit SHA, patch strategy, before/after latency percentiles, and escalation verdict.
+
+### 3. Real-Time Server-Sent Events (SSE) Mission Control
+- Mounts an async event stream at `GET /api/v1/events/stream`.
+- Visualizes attack radars, telemetry, live CST code diffs, mutation progress, and Git audit records in real-time as the Arbiter executes.
+
+### 4. Automated Multi-Format Audit Reporting
+Every closed-loop execution outputs complete post-mortem evidence under `artifacts/`:
+- `INCIDENT_REPORT.md`: Comprehensive Markdown post-mortem with event timelines and root-cause analysis.
+- `artifacts/report.html`: Interactive standalone HTML dashboard.
+- `artifacts/metrics.prom`: Prometheus exposition metrics (`omni_immunity_score`, `omni_survival_rate_mean`, etc.).
+- `artifacts/prs/<sig_id>.md`: Ready-to-merge GitHub Pull Request templates with reproduction `curl` commands and test checklists.
+
+---
+
+## 🧪 Testing & Verification
+
+The suite includes comprehensive unit, integration, and end-to-end chaos verification tests:
+
+```bash
+# Run the complete offline test suite (92 tests)
+make test
+# or: .venv/bin/pytest -v tests/
 ```
 
-## Four phases
+Test coverage includes:
+- Fuzzing, storm concurrency, and latency proxy failure injection.
+- LibCST AST transformers and docstring preservation.
+- Deterministic OpenAPI schema parsing and payload synthesis.
+- Adversarial escalation mutation rounds.
+- Temporary Git index isolation and branch sanitization.
+- Zero-trust HMAC immune memory tamper rejection.
+- Dashboard SSE broadcaster fan-out and CLI argument validation.
 
-1. **Baseline:** `/health`, `/api/v1/catalog`, and `/api/v1/status` establish a
-   clean target before chaos begins.
-2. **Break it:** FuzzNet triggers the order panic, StormLoad stresses the
-   serialized inventory lock, and LatencyDrift triggers the uncapped upstream
-   request.
-3. **Heal it:** TriageEngine identifies the failure signature and PatchLadder
-   tries the smallest CST transformer first, rolling back on failed proof.
-4. **Prove it:** the target is restarted, the exact DNA is replayed, and the
-   golden endpoints are checked again. Verified patches are stored in Immune
-   Memory and included in the incident report. Passing repairs then continue
-   through the adversarial escalation round and Git audit persistence described
-   below.
+---
 
-Run 1 heals all three bugs. Run 2 sees the same signatures and loads the
-verified patches immediately, which is shown as a `MEMORY_HIT` / vaccinated
-count in the HUD and JSON summary.
-
-## Adversarial Escalation Round
-
-After the exact triggering `AttackDNA` passes baseline verification and golden
-regression, the `EscalationEngine` runs a deterministic mutation-testing round
-to check generalized immunity. Each incident receives exactly three bounded
-mutations with independently regenerated DNA identities:
-
-- JSON order requests exercise a numeric boundary, a Unicode/injection-shaped
-  value, and nested type confusion.
-- Inventory stress requests vary concurrency and request count within fixed
-  limits.
-- Query-driven requests vary the relevant `delay` parameter, including a
-  bounded malformed value.
-
-Every mutation must complete within the execution budget, leave the target
-healthy, and return an accepted success or validation response. A controlled
-HTTP 504 from the payment timeout guard is accepted as containment. The Arbiter
-keeps baseline verification and generalized-immunity certification distinct:
-`escalation_passed` is only set after all mutations survive. Lifecycle events
-(`escalation_started`, `escalation_passed`, and `escalation_failed`) appear in
-the event timeline, HUD state, and generated `INCIDENT_REPORT.md`.
-
-## Auto-Branching Git Engine
-
-Every verified repair is persisted as an auditable, isolated Git branch named
-`heal/<sanitized_sig_id>`, for example `heal/sig-order-panic-01`. The
-`GitBranchEngine`:
-
-1. Validates the repository, active symbolic branch, target path, tracked-file
-   status, and verification gate.
-2. Builds a commit from the original `HEAD` plus only the patched target file
-   using a temporary Git index. Unrelated staged, unstaged, and untracked work
-   is preserved.
-3. Creates the branch without checking it out, so the original branch and
-   `HEAD` remain active and unchanged. The patched target file is restored on
-   the original worktree after the branch commit is saved.
-4. Refuses detached or conflicted repositories, invalid paths, failed or
-   incomplete verification, existing repair branches, and unsafe branch names.
-
-The audit commit records the signature ID, triggering DNA ID and SHA-256,
-original branch, base commit, target file, patch strategy, pre-heal error rate,
-post-heal survival rate, p99 latency, baseline verification, escalation status,
-golden regression, and `OmniImmune Engine` attribution. The terminal HUD shows
-the actual branch and short commit SHA. The incident report records `CREATED`,
-`FAILED`, or `NOT_ATTEMPTED` accurately; a Git persistence failure never gets
-reported as a successful commit.
-
-## CLI
+## 📂 Project Structure
 
 ```text
---mode docker|local   Runtime placement (default: docker)
---seed INTEGER        Deterministic chaos seed (default: 1337)
---fresh               Clear cached immune signatures before running
---no-ui               Stream no HUD output; useful in CI
---json                Emit the final ImmunitySummary as JSON
---push-pr             Push verified `heal/*` branches and create pull requests with `gh`
---serve-dashboard [PORT]
-                      Serve the browser dashboard without running chaos
-                      (default port when supplied without a value: 8080)
+├── artifacts/              # Generated reports, DNA signatures, patches, and metrics
+├── blueprints/             # Abstract agent blueprints for triage, patcher, and verifier
+├── omniimmune/
+│   ├── arbiter.py          # Central supervisor orchestrating Red → Blue → Verify
+│   ├── models.py           # Pydantic v2 domain schemas (AttackDNA, LatencyStats, etc.)
+│   ├── events.py           # Async EventBus supporting sync/async fan-out
+│   ├── memory.py           # HMAC-SHA256 signed zero-trust immune memory
+│   ├── report.py           # Markdown, HTML, Prometheus, and PR template generators
+│   ├── chaos/              # Red Team agents (Fuzzer, StormLoad, LatencyProxy, Runner)
+│   ├── healer/             # Blue Team engine (TriageEngine, PatchLadder, GitBranchEngine)
+│   ├── verifier/           # Verification core (ReplayVerifier, EscalationEngine)
+│   └── ui/                 # Rich terminal HUD (hud.py) & FastAPI Dashboard (web.py)
+├── target_app/             # Intentionally vulnerable target microservice (FastAPI)
+├── upstream/               # Upstream mock service with configurable latency
+├── scripts/                # Video generation and utility scripts
+├── tests/                  # 92 unit and integration test suites
+├── docker-compose.yml      # Multi-container sandbox configuration
+├── Dockerfile              # Pinned Python 3.12.8 container image
+├── Makefile                # Standardized developer commands (test, demo, dashboard)
+└── main.py                 # Unified CLI entrypoint
 ```
 
-`--push-pr` is opt-in. It requires an `origin` remote and a locally
-authenticated GitHub CLI (`gh auth status`). Each verified repair is pushed
-without force-updating an existing remote branch, then opened with the
-generated `artifacts/prs/<signature>.md` body. A push or PR failure is recorded
-in the incident report and JSON timeline while the verified heal run still
-completes and exits non-zero; no access token is read or written by
-OmniImmune.
+---
 
-## Docker notes
+## 📜 License
 
-The Compose demo uses three services on the `omni_net` network. The Arbiter
-mounts `/var/run/docker.sock` so Docker mode can restart the target after a
-patch; it also mounts the target source so the CST edit is visible to the
-target container. This is intentionally a local demonstration sandbox and
-requires a Docker daemon available to Compose.
-
-## Checks and reproducibility
-
-- Runtime and all Python packages are pinned (`.python-version` and
-  `requirements.lock`).
-- `make test` is the single offline test command.
-- CI runs `pytest -v tests/` followed by
-  `docker compose up --build --exit-code-from omniimmune`.
-- No secrets are required; `.env.example` documents optional environment
-  overrides.
-
-## Assumptions
-
-- The bundled vulnerable target is the Phase 1–3 target and is the source file
-  patched by the demo.
-- Local mode may use ports 8000 and 9000 unless `TARGET_URL` and `UPSTREAM_URL`
-  point at other local services.
-- A handled `504` from the explicit upstream timeout boundary counts as a
-  contained, surviving incident.
-- Compose Docker mode uses the conventional container name
-  `omniimmune-target`, overridable with `OMNI_TARGET_CONTAINER`.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
