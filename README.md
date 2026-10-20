@@ -129,7 +129,7 @@ Unknown signatures can use the optional LLM fallback. The generated unified diff
 
 ### Prerequisites
 
-- Python **3.12.8**, pinned in `.python-version`.
+- `curl` and `uv` (the setup below installs `uv` if it is not already available).
 - Docker Engine with Docker Compose **v2** for the containerized path.
 - Git. The local path runs offline after the locked dependencies are installed.
 
@@ -139,37 +139,75 @@ Unknown signatures can use the optional LLM fallback. The generated unified diff
 git clone https://github.com/potlasrisharan/ominirush-Immune.git
 cd omnirush-Immune
 
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install --requirement requirements.lock
-cp .env.example .env  # optional; never commit secrets
+# Install uv for this shell when it is not already on PATH.
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+
+# Obtain the exact pinned interpreter and verify the repository pin.
+uv python install 3.12.8
+test "$(tr -d '\r\n' < .python-version)" = "3.12.8"
+
+# Create the project environment, or verify an existing one is exact.
+if [ -x .venv/bin/python ]; then
+  test "$(.venv/bin/python --version)" = "Python 3.12.8"
+else
+  uv venv --python 3.12.8 .venv
+fi
+test "$(.venv/bin/python --version)" = "Python 3.12.8"
+
+# Install only the locked dependencies into this project environment.
+.venv/bin/python -m pip install --requirement requirements.lock
+
+# Create local configuration without overwriting an existing .env.
+if [ ! -f .env ]; then cp .env.example .env; fi
 ```
 
-### Reproducible build, test, and run commands
+The `.env.example` values target the Compose network. Keep `.env` local; it is
+ignored by Git. The deterministic demo does not require a secret, but set
+`OMNI_SIGNING_KEY` in `.env` for a deployment environment.
 
-From the repository root, these are the canonical commands:
+### Test locally
+
+From the repository root, run the offline suite with the interpreter just
+verified above:
 
 ```bash
-# Build the application image
-docker build -t omniimmune:local .
-
-# Run the complete isolated stack
-docker compose up --build
-
-# Run the offline test suite (after the local environment is installed)
 make test
 ```
 
-The image uses Python 3.12.8 and installs the fully pinned `requirements.lock`.
-The Compose command starts the upstream mock, target service, and Arbiter together.
+### Docker build, run, health, and stop
 
-### Run the isolated Docker mission
-
-This starts the upstream mock, vulnerable target, and Arbiter on a private Compose network:
+The image uses Python 3.12.8 and installs the fully pinned
+`requirements.lock`. Build the image, then start the upstream mock, vulnerable
+target, and Arbiter on the private `omni_net` Compose network:
 
 ```bash
-docker compose up --build
+# Build the application image (Compose builds the three service images below).
+docker build -t omniimmune:local .
+
+# Build all services and run the isolated mission in the background.
+docker compose up -d --build
+
+# The target and upstream containers should report "healthy".
+docker compose ps --all
+
+# Check the actual service health endpoints from inside the Compose network.
+docker compose exec -T target python -c 'import urllib.request; r=urllib.request.urlopen("http://127.0.0.1:8000/health"); print(r.status, r.read().decode())'
+docker compose exec -T upstream python -c 'import urllib.request; r=urllib.request.urlopen("http://127.0.0.1:9000/health"); print(r.status, r.read().decode())'
+
+# Inspect the Arbiter output if needed.
+docker compose logs --no-color omniimmune
+
+# Stop and remove the Compose services and network.
+docker compose down --remove-orphans
 ```
+
+The target health endpoint is `http://127.0.0.1:8000/health` inside the
+`target` container and the upstream health endpoint is
+`http://127.0.0.1:9000/health` inside `upstream`; neither service is published
+to the Linux host by default.
 
 ### Run the offline local mission
 
